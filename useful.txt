@@ -1,3 +1,10 @@
 // command to run server: npx ts-node src/index.ts
 //PAT login for github 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
 
+
+//The following is the script to create the PostgreSQL database
+CREATE DATABASE es_dispatch;
+
+CREATE USER dispatch_user WITH PASSWORD 'yourpassword';
+GRANT ALL PRIVILEGES ON DATABASE es_dispatch TO dispatch_user;
+
