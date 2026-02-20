@@ -4,7 +4,7 @@ const pool = new Pool({
   user: "dispatch_user",
   host: "localhost",
   database: "es_dispatch",
-  password: "yourpassword",
+  password: "lensho1304", //other password is yourpassword
   port: 5432,
 });
 
