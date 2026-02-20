@@ -1,11 +1,14 @@
+import dotenv from "dotenv";
+dotenv.config();
+  
 import { Pool } from "pg";
 
 const pool = new Pool({
-  user: "dispatch_user",
-  host: "localhost",
-  database: "es_dispatch",
-  password: "lensho1304", //other password is yourpassword
-  port: 5432,
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: Number(process.env.DB_PORT),
 });
 
 export default pool;

@@ -8,3 +8,4 @@ CREATE DATABASE es_dispatch;
 CREATE USER dispatch_user WITH PASSWORD 'yourpassword';
 GRANT ALL PRIVILEGES ON DATABASE es_dispatch TO dispatch_user;
 
+// psql database username is "dispatch_user, database name is "es_dispatch", default password is "yourpassword"
