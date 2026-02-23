@@ -1,9 +1,12 @@
-import express from "express";
-import enrollmentRoutes from "./routes/enrollments";
-import cors from "cors";
 import healthRoutes from "./routes/health.routes";
+import enrollmentRoutes from "./routes/enrollments";
+import offerRoutes from "./routes/offers";
+import express from "express";
+import cors from "cors";
 import pool from "./config/db";
 import dotenv from "dotenv";
+
+
 
 dotenv.config();
 
@@ -11,7 +14,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/enrollments", enrollmentRoutes);
-
+app.use("/offers", offerRoutes);
 app.get("/health",healthRoutes)
 
 const PORT = 4000;
