@@ -4,15 +4,15 @@ import pool from "../config/db";
 const router = Router();
 
 /* ======================================================
-   CREATE ENROLLMENT + DISPATCH OFFER
+   CREATE ENROLLMENT + DISPATCH OFFER (with BUSY fallback)
 ====================================================== */
 router.post("/", async (req, res) => {
   const { premise_id, requested_by, timeslot } = req.body;
 
-  const client = await pool.connect(); // ✅ dedicated connection
+  const client = await pool.connect();
 
   try {
-    await client.query("BEGIN"); // ✅ start transaction
+    await client.query("BEGIN");
 
     // 1️⃣ Create enrollment
     const enrollmentResult = await client.query(
@@ -24,23 +24,40 @@ router.post("/", async (req, res) => {
 
     const enrollment = enrollmentResult.rows[0];
 
-    // 2️⃣ Find fairest AVAILABLE ES
-    const esResult = await client.query(
+    // 2️⃣ Find fairest AVAILABLE ES first
+    let esResult = await client.query(
       `SELECT * FROM users
-       WHERE role = 'ES' 
+       WHERE role = 'ES'
          AND status = 'AVAILABLE'
        ORDER BY last_assigned_at ASC NULLS FIRST
        LIMIT 1`
     );
 
+    let selectedES;
+    let queuedForBusy = false; // 🔹 flag if we assign to BUSY ES
+
     if (esResult.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "No available ES" });
+      // 🔹 No AVAILABLE ES → fallback to fairest BUSY ES
+      esResult = await client.query(
+        `SELECT * FROM users
+         WHERE role = 'ES'
+           AND status = 'BUSY'
+         ORDER BY last_assigned_at ASC NULLS FIRST
+         LIMIT 1`
+      );
+
+      if (esResult.rows.length === 0) {
+        // 🔹 No ES at all → rollback
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "No ES available for assignment" });
+      }
+
+      queuedForBusy = true;
     }
 
-    const selectedES = esResult.rows[0];
+    selectedES = esResult.rows[0];
 
-    // 3️⃣ Create offer (5 minute expiry)
+    // 3️⃣ Create offer (expires in 5 minutes)
     const offerResult = await client.query(
       `INSERT INTO enrollment_offers 
        (enrollment_id, es_id, expires_at)
@@ -51,28 +68,31 @@ router.post("/", async (req, res) => {
 
     const offer = offerResult.rows[0];
 
-    // 4️⃣ Update fairness timestamp
-    await client.query(
-      `UPDATE users
-       SET last_assigned_at = NOW()
-       WHERE id = $1`,
-      [selectedES.id]
-    );
+    // 4️⃣ Update fairness timestamp ONLY if ES is AVAILABLE
+    if (!queuedForBusy) {
+      await client.query(
+        `UPDATE users
+         SET last_assigned_at = NOW()
+         WHERE id = $1`,
+        [selectedES.id]
+      );
+    }
 
-    await client.query("COMMIT"); // ✅ commit only if all steps succeed
+    await client.query("COMMIT");
 
     res.status(201).json({
       enrollment,
       offered_to: selectedES.name,
       offer,
+      queued_for_busy: queuedForBusy // 🔹 optional info for frontend
     });
 
   } catch (error) {
-    await client.query("ROLLBACK"); // ✅ rollback on ANY failure
+    await client.query("ROLLBACK");
     console.error("Enrollment creation error:", error);
     res.status(500).json({ error: "Internal server error" });
   } finally {
-    client.release(); // ✅ always release connection
+    client.release();
   }
 });
 
@@ -88,7 +108,6 @@ router.post("/:id/complete", async (req, res) => {
   try {
     await client.query("BEGIN");
 
-    // 1️⃣ Get enrollment
     const enrollmentResult = await client.query(
       `SELECT * FROM enrollments WHERE id = $1`,
       [id]
@@ -106,7 +125,7 @@ router.post("/:id/complete", async (req, res) => {
       return res.status(400).json({ error: "Enrollment is not assigned" });
     }
 
-    // 2️⃣ Mark enrollment as COMPLETED
+    // 1️⃣ Mark enrollment as COMPLETED
     await client.query(
       `UPDATE enrollments
        SET status = 'COMPLETED'
@@ -114,7 +133,7 @@ router.post("/:id/complete", async (req, res) => {
       [id]
     );
 
-    // 3️⃣ Free the assigned ES
+    // 2️⃣ Free the assigned ES
     await client.query(
       `UPDATE users
        SET status = 'AVAILABLE'

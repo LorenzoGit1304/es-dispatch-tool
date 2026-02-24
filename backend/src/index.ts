@@ -1,21 +1,26 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+
 import healthRoutes from "./routes/health.routes";
 import enrollmentRoutes from "./routes/enrollments";
 import offerRoutes from "./routes/offers";
-import express from "express";
-import cors from "cors";
+import userRoutes from "./routes/users";
+
 import pool from "./config/db";
-import dotenv from "dotenv";
-
-
+import "./jobs/offerTimeoutJob";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+//Mount routes
 app.use("/enrollments", enrollmentRoutes);
 app.use("/offers", offerRoutes);
-app.get("/health",healthRoutes)
+app.get("/health",healthRoutes);
+app.use("/users", userRoutes);
 
 const PORT = 4000;
 
