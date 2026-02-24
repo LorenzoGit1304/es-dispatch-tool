@@ -3,12 +3,19 @@ import pool from "../config/db";
 
 const router = Router();
 
+/* ======================================================
+   CREATE ENROLLMENT + DISPATCH OFFER
+====================================================== */
 router.post("/", async (req, res) => {
   const { premise_id, requested_by, timeslot } = req.body;
 
+  const client = await pool.connect(); // ✅ dedicated connection
+
   try {
-    // 1 Create enrollment
-    const enrollmentResult = await pool.query(
+    await client.query("BEGIN"); // ✅ start transaction
+
+    // 1️⃣ Create enrollment
+    const enrollmentResult = await client.query(
       `INSERT INTO enrollments (premise_id, requested_by, timeslot)
        VALUES ($1, $2, $3)
        RETURNING *`,
@@ -17,22 +24,24 @@ router.post("/", async (req, res) => {
 
     const enrollment = enrollmentResult.rows[0];
 
-    // 2 Find fairest available ES
-    const esResult = await pool.query(
+    // 2️⃣ Find fairest AVAILABLE ES
+    const esResult = await client.query(
       `SELECT * FROM users
-       WHERE role = 'ES' AND status = 'AVAILABLE'
+       WHERE role = 'ES' 
+         AND status = 'AVAILABLE'
        ORDER BY last_assigned_at ASC NULLS FIRST
        LIMIT 1`
     );
 
     if (esResult.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: "No available ES" });
     }
 
     const selectedES = esResult.rows[0];
 
-    // 3 Create offer (expires in 5 minutes)
-    const offerResult = await pool.query(
+    // 3️⃣ Create offer (5 minute expiry)
+    const offerResult = await client.query(
       `INSERT INTO enrollment_offers 
        (enrollment_id, es_id, expires_at)
        VALUES ($1, $2, NOW() + INTERVAL '5 minutes')
@@ -42,13 +51,15 @@ router.post("/", async (req, res) => {
 
     const offer = offerResult.rows[0];
 
-    // 4 Update ES fairness timestamp
-    await pool.query(
-        `UPDATE users
-         SET last_assigned_at = NOW()
-         WHERE id = $1`,
-        [selectedES.id]
+    // 4️⃣ Update fairness timestamp
+    await client.query(
+      `UPDATE users
+       SET last_assigned_at = NOW()
+       WHERE id = $1`,
+      [selectedES.id]
     );
+
+    await client.query("COMMIT"); // ✅ commit only if all steps succeed
 
     res.status(201).json({
       enrollment,
@@ -56,16 +67,88 @@ router.post("/", async (req, res) => {
       offer,
     });
 
-
   } catch (error) {
+    await client.query("ROLLBACK"); // ✅ rollback on ANY failure
     console.error("Enrollment creation error:", error);
     res.status(500).json({ error: "Internal server error" });
+  } finally {
+    client.release(); // ✅ always release connection
   }
 });
 
+
+/* ======================================================
+   COMPLETE ENROLLMENT
+====================================================== */
+router.post("/:id/complete", async (req, res) => {
+  const { id } = req.params;
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1️⃣ Get enrollment
+    const enrollmentResult = await client.query(
+      `SELECT * FROM enrollments WHERE id = $1`,
+      [id]
+    );
+
+    if (enrollmentResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Enrollment not found" });
+    }
+
+    const enrollment = enrollmentResult.rows[0];
+
+    if (enrollment.status !== "ASSIGNED") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Enrollment is not assigned" });
+    }
+
+    // 2️⃣ Mark enrollment as COMPLETED
+    await client.query(
+      `UPDATE enrollments
+       SET status = 'COMPLETED'
+       WHERE id = $1`,
+      [id]
+    );
+
+    // 3️⃣ Free the assigned ES
+    await client.query(
+      `UPDATE users
+       SET status = 'AVAILABLE'
+       WHERE id = $1`,
+      [enrollment.assigned_es_id]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Enrollment completed successfully" });
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Complete enrollment error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  } finally {
+    client.release();
+  }
+});
+
+
+/* ======================================================
+   LIST ENROLLMENTS
+====================================================== */
 router.get("/", async (req, res) => {
-  const result = await pool.query("SELECT * FROM enrollments");
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT * FROM enrollments ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Fetch enrollments error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 export default router;
