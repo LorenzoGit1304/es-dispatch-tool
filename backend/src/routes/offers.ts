@@ -78,20 +78,30 @@ router.post("/:id/accept", async (req, res) => {
 router.post("/:id/reject", async (req, res) => {
   const { id } = req.params;
 
+    // 🔹 CHANGED: Get dedicated client for transaction
+  const client = await pool.connect();
+
   try {
-    // 1️⃣ Get the offer
+    // 🔹 CHANGED: Start transaction
+    await client.query("BEGIN");
+
+    // 1️⃣ Get the offer (now using client instead of pool)
     const offerResult = await pool.query(
       `SELECT * FROM enrollment_offers WHERE id = $1`,
       [id]
     );
 
     if (offerResult.rows.length === 0) {
+      // 🔹 CHANGED: Rollback before returning
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Offer not found" });
     }
 
     const offer = offerResult.rows[0];
 
     if (offer.status !== "PENDING") {
+      // 🔹 CHANGED: Rollback before returning
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: "Offer already processed" });
     }
 
@@ -115,6 +125,8 @@ router.post("/:id/reject", async (req, res) => {
     );
 
     if (nextESResult.rows.length === 0) {
+      // 🔹 CHANGED: Commit rejection only (no reassignment possible)
+      await client.query("COMMIT");
       return res.status(400).json({ error: "No other available ES" });
     }
 
@@ -130,12 +142,16 @@ router.post("/:id/reject", async (req, res) => {
     );
 
     // 5️⃣ Update fairness timestamp
+    // 🔹 NOTE: You were already doing this — kept as-is
     await pool.query(
       `UPDATE users
        SET last_assigned_at = NOW()
        WHERE id = $1`,
       [nextES.id]
     );
+
+    // 🔹 CHANGED: Commit only after ALL steps succeed
+    await client.query("COMMIT");
 
     res.json({
       message: "Offer rejected. Reassigned to next ES.",
@@ -144,8 +160,13 @@ router.post("/:id/reject", async (req, res) => {
     });
 
   } catch (error) {
+    // 🔹 CHANGED: Rollback entire operation on any failure
+    await client.query("ROLLBACK");
     console.error("Reject error:", error);
     res.status(500).json({ error: "Internal server error" });
+  } finally {
+    // 🔹 CHANGED: Always release client
+    client.release();
   }
 });
 
