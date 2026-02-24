@@ -1,2 +1,5 @@
-*Implement ENV file
+- Implement authentication and role-based access control.
+- Add request validation middleware across all write endpoints.
+- Add automated tests for dispatch fairness and race-condition scenarios.
+- Add migration tooling and CI pipeline checks.
 
