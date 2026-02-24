@@ -4,45 +4,35 @@ import pool from "../config/db";
 const router = Router();
 
 /* ======================================================
-   ACCEPT OFFER
+   ACCEPT OFFER (Race-Safe Version)
 ====================================================== */
 router.post("/:id/accept", async (req, res) => {
   const { id } = req.params;
-
-  const client = await pool.connect(); // ✅ dedicated connection
+  const client = await pool.connect();
 
   try {
-    await client.query("BEGIN"); // ✅ start transaction
+    await client.query("BEGIN");
 
-    // 1️⃣ Get offer
-    const offerResult = await client.query(
-      `SELECT * FROM enrollment_offers WHERE id = $1`,
-      [id]
-    );
-
-    if (offerResult.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Offer not found" });
-    }
-
-    const offer = offerResult.rows[0];
-
-    if (offer.status !== "PENDING") {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Offer already processed" });
-    }
-
-    // 2️⃣ Mark offer ACCEPTED
-    await client.query(
+    // 🔒 SAFER PATTERN:
+    // Atomically update ONLY if status is still PENDING
+    // This prevents double-accept race conditions
+    const acceptResult = await client.query(
       `UPDATE enrollment_offers
        SET status = 'ACCEPTED'
-       WHERE id = $1`,
+       WHERE id = $1
+         AND status = 'PENDING'
+       RETURNING *`,
       [id]
     );
 
-    // 3️⃣ Update enrollment:
-    //    - Mark ASSIGNED
-    //    - Store which ES accepted (NEW)
+    if (acceptResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Offer already processed or not found" });
+    }
+
+    const offer = acceptResult.rows[0];
+
+    // 2️⃣ Update enrollment (assign ES)
     await client.query(
       `UPDATE enrollments
        SET status = 'ASSIGNED',
@@ -51,7 +41,7 @@ router.post("/:id/accept", async (req, res) => {
       [offer.es_id, offer.enrollment_id]
     );
 
-    // 4️⃣ Mark ES as BUSY and update fairness timestamp
+    // 3️⃣ Mark ES as BUSY
     await client.query(
       `UPDATE users
        SET status = 'BUSY',
@@ -60,34 +50,35 @@ router.post("/:id/accept", async (req, res) => {
       [offer.es_id]
     );
 
-    await client.query("COMMIT"); // ✅ commit only if ALL succeed
+    await client.query("COMMIT");
 
     res.json({ message: "Offer accepted successfully" });
 
   } catch (error) {
-    await client.query("ROLLBACK"); // ✅ rollback everything on error
+    await client.query("ROLLBACK");
     console.error("Accept error:", error);
     res.status(500).json({ error: "Internal server error" });
   } finally {
-    client.release(); // ✅ always release
+    client.release();
   }
 });
 
 
 /* ======================================================
-   REJECT OFFER
+   REJECT OFFER (Race-Safe Version)
 ====================================================== */
 router.post("/:id/reject", async (req, res) => {
   const { id } = req.params;
-
-  const client = await pool.connect(); // ✅ dedicated connection
+  const client = await pool.connect();
 
   try {
-    await client.query("BEGIN"); // ✅ start transaction
+    await client.query("BEGIN");
 
-    // 1️⃣ Get offer
+    // 🔒 Lock the row so no concurrent modification happens
     const offerResult = await client.query(
-      `SELECT * FROM enrollment_offers WHERE id = $1`,
+      `SELECT * FROM enrollment_offers
+       WHERE id = $1
+       FOR UPDATE`,
       [id]
     );
 
@@ -111,9 +102,10 @@ router.post("/:id/reject", async (req, res) => {
       [id]
     );
 
-    // 3️⃣ Find next available ES (excluding rejecting ES)
+    // 3️⃣ Find next AVAILABLE ES (excluding rejecting ES)
     const nextESResult = await client.query(
-      `SELECT * FROM users
+      `SELECT *
+       FROM users
        WHERE role = 'ES'
          AND status = 'AVAILABLE'
          AND id != $1
@@ -123,14 +115,13 @@ router.post("/:id/reject", async (req, res) => {
     );
 
     if (nextESResult.rows.length === 0) {
-      // No reassignment possible → commit rejection only
-      await client.query("COMMIT");
+      await client.query("COMMIT"); // rejection is valid even without reassignment
       return res.status(400).json({ error: "No other available ES" });
     }
 
     const nextES = nextESResult.rows[0];
 
-    // 4️⃣ Create new offer for next ES
+    // 4️⃣ Create new offer
     const newOfferResult = await client.query(
       `INSERT INTO enrollment_offers
        (enrollment_id, es_id, expires_at)
@@ -147,7 +138,7 @@ router.post("/:id/reject", async (req, res) => {
       [nextES.id]
     );
 
-    await client.query("COMMIT"); // ✅ commit only after ALL succeed
+    await client.query("COMMIT");
 
     res.json({
       message: "Offer rejected. Reassigned to next ES.",
@@ -156,11 +147,11 @@ router.post("/:id/reject", async (req, res) => {
     });
 
   } catch (error) {
-    await client.query("ROLLBACK"); // ✅ rollback everything
+    await client.query("ROLLBACK");
     console.error("Reject error:", error);
     res.status(500).json({ error: "Internal server error" });
   } finally {
-    client.release(); // ✅ always release
+    client.release();
   }
 });
 
