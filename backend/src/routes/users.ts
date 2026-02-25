@@ -123,4 +123,5 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+console.log("Users route loaded");
 export default router;

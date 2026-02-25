@@ -170,4 +170,5 @@ router.get("/", async (req, res) => {
   }
 });
 
+console.log("Enrollments route loaded");
 export default router;

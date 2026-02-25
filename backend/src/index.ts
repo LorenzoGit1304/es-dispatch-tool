@@ -1,7 +1,11 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 
+import dotenv from "dotenv";
+dotenv.config();
+
+import { clerkMiddleware } from "@clerk/express";
+import { requireAuth } from "./middleware/requireAuth";
 
 import healthRoutes from "./routes/health.routes";
 import enrollmentRoutes from "./routes/enrollments";
@@ -11,17 +15,21 @@ import userRoutes from "./routes/users";
 import pool from "./config/db";
 import "./jobs/offerTimeoutJob";
 
-dotenv.config();
-
 const app = express();
+
+// Must be first, before any routes
+app.use(clerkMiddleware());
+
 app.use(cors());
 app.use(express.json());
 
-//Mount routes
-app.use("/enrollments", enrollmentRoutes);
-app.use("/offers", offerRoutes);
-app.use("/health",healthRoutes);
-app.use("/users", userRoutes);
+// Public route — no auth required
+app.use("/health", healthRoutes);
+
+// Protected routes
+app.use("/enrollments", requireAuth, enrollmentRoutes);
+app.use("/offers", requireAuth, offerRoutes);
+app.use("/users", requireAuth, userRoutes);
 
 const PORT = Number(process.env.PORT ?? 4000);
 
