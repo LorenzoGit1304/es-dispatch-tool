@@ -1,5 +1,9 @@
-- Implement authentication and role-based access control.
-- Add request validation middleware across all write endpoints.
-- Add automated tests for dispatch fairness and race-condition scenarios.
-- Add migration tooling and CI pipeline checks.
-
+- [x] Phase 1 complete through step 1.4 (Backend fixes + Clerk auth + clerk_id linking).
+- [ ] Phase 2.1 Install Zod and add reusable validate middleware (`src/middleware/validate.ts`).
+- [ ] Phase 2.2 Add schemas for all write endpoints (`/enrollments`, `/users`, `/users/:id`, `/users/:id/status`, `/users/sync`).
+- [ ] Phase 2.3 Standardize error format and add shared API error helper.
+- [ ] Phase 3 Set up `node-pg-migrate` and convert SQL files to migration scripts.
+- [ ] Phase 4 Add missing detail endpoints and pagination for list routes.
+- [ ] Phase 5 Add audit log table + write tracking on all mutations.
+- [ ] Phase 7 Add automated tests (dispatch fairness, race conditions, auth/role).
+- [ ] Phase 8 Railway deployment pipeline + health monitoring.

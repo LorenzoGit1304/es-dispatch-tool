@@ -6,15 +6,20 @@ Dispatch workflow for handling enrollment transfer requests and routing them to 
 - **Backend**: Node.js + Express + TypeScript + PostgreSQL.
 - **Frontend**: React + Vite + TypeScript web UI for dispatch team operations.
 
-## Backend capabilities (implemented)
+## Current stage
 
-- Create enrollment request and dispatch to fairest available ES.
-- Fallback assignment to BUSY ES queue when no AVAILABLE ES exists.
-- Offer lifecycle endpoints:
-  - Accept offer (`POST /offers/:id/accept`)
-  - Reject offer (`POST /offers/:id/reject`)
-- Automatic timeout job to expire old pending offers and re-dispatch.
-- User management endpoints for operational updates.
+Project status is updated to **completed through Phase 1.4** from `ES_Dispatch_Dev_Plan.docx.pdf`.
+
+Completed so far:
+- Core dispatch, fallback assignment, offer lifecycle, timeout job, user CRUD.
+- DB hardening and indexing migrations (`001` to `006`).
+- Health route correctly mounted.
+- Clerk auth integrated (`clerkMiddleware`, protected route mounts, auth middleware flow).
+- Clerk identity linking implemented (`users.clerk_id`, `email`, `/users/sync`, `requireRole` middleware scaffolding).
+
+Active focus now:
+- **Phase 2: Validation & Error Contracts**.
+
 
 ## Backend setup
 
@@ -25,6 +30,7 @@ Dispatch workflow for handling enrollment transfer requests and routing them to 
    - `backend/sql/004_create_indexes.sql`
    - `backend/sql/005_seed_data.sql`
    - `backend/sql/006_hardening_updates.sql`
+   - `backend/sql/007_add_clerk_fiels.sql`
 2. Add `backend/.env`:
 
 ```env
@@ -34,6 +40,9 @@ DB_NAME=es_dispatch
 DB_PASSWORD=yourpassword
 DB_PORT=5432
 PORT=4000
+CLERK_SECRET_KEY=your_clerk_secret_key
+CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+FRONTEND_URL=http://localhost:5173
 ```
 
 3. Start backend:
@@ -54,11 +63,10 @@ npm run dev
 
 Frontend expects backend at `http://localhost:4000`.
 
-## Roadmap to production readiness
+## Next milestones
 
-1. Add authentication/authorization (role-based access and audit trails).
-2. Add comprehensive validation and consistent error contracts.
-3. Add automated tests (unit + integration + concurrency cases).
-4. Add migrations tooling and CI/CD checks.
-5. Add monitoring/alerts for offer timeout and dispatch failures.
-
+1. Phase 2: add request validation with Zod + standard error contracts.
+2. Phase 3: move to migration tooling (`node-pg-migrate`).
+3. Phase 4: fill missing endpoints and add pagination.
+4. Phase 5: add audit log for all mutating operations.
+5. Phase 6-8: frontend completion, test suite, and Railway production deploy.
