@@ -4,6 +4,49 @@ import pool from "../config/db";
 const router = Router();
 
 /* ======================================================
+   SYNC CLERK USER (called on first login)
+====================================================== */
+router.post("/sync", async (req, res) => {
+  const clerkId = (req as any).auth?.userId;
+
+  if (!clerkId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { email, name } = req.body;
+
+  if (!email || !name) {
+    return res.status(400).json({ error: "Missing email or name" });
+  }
+
+  try {
+    // If user already exists, return them
+    const existing = await pool.query(
+      "SELECT id, name, role, status, clerk_id, email FROM users WHERE clerk_id = $1",
+      [clerkId]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.json(existing.rows[0]);
+    }
+
+    // Otherwise create new user with default role ES
+    const result = await pool.query(
+      `INSERT INTO users (name, email, clerk_id, role, status)
+       VALUES ($1, $2, $3, 'ES', 'AVAILABLE')
+       RETURNING id, name, role, status, clerk_id, email`,
+      [name, email, clerkId]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Sync error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+/* ======================================================
    LIST ALL USERS
 ====================================================== */
 router.get("/", async (req, res) => {
