@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 
+
 import healthRoutes from "./routes/health.routes";
 import enrollmentRoutes from "./routes/enrollments";
 import offerRoutes from "./routes/offers";
@@ -19,7 +20,7 @@ app.use(express.json());
 //Mount routes
 app.use("/enrollments", enrollmentRoutes);
 app.use("/offers", offerRoutes);
-app.get("/health",healthRoutes);
+app.use("/health",healthRoutes);
 app.use("/users", userRoutes);
 
 const PORT = Number(process.env.PORT ?? 4000);
