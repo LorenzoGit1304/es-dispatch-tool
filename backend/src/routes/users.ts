@@ -1,22 +1,29 @@
 import { Router } from "express";
 import pool from "../config/db";
+import { validate } from "../middleware/validate";
+import {
+  idParamSchema,
+  userCreateSchema,
+  userStatusUpdateSchema,
+  userSyncSchema,
+  userUpdateSchema,
+} from "../schemas/requestSchemas";
 
 const router = Router();
 
 /* ======================================================
    SYNC CLERK USER (called on first login)
 ====================================================== */
-router.post("/sync", async (req, res) => {
+router.post("/sync", validate(userSyncSchema), async (req, res) => {
   const clerkId = (req as any).auth?.userId;
 
   if (!clerkId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { email, name } = req.body;
-
-  if (!email || !name) {
-    return res.status(400).json({ error: "Missing email or name" });
+  const { clerk_id, email, name } = req.body;
+  if (clerk_id !== clerkId) {
+    return res.status(400).json({ error: "clerk_id does not match authenticated user" });
   }
 
   try {
@@ -81,13 +88,9 @@ router.get("/:id", async (req, res) => {
    UPDATE USER STATUS
    (e.g., AVAILABLE, BUSY, UNAVAILABLE)
 ====================================================== */
-router.patch("/:id/status", async (req, res) => {
+router.patch("/:id/status", validate(idParamSchema, "params"), validate(userStatusUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-
-  if (!["AVAILABLE", "BUSY", "UNAVAILABLE"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status value" });
-  }
 
   try {
     const result = await pool.query(
@@ -105,12 +108,8 @@ router.patch("/:id/status", async (req, res) => {
 /* ======================================================
    CREATE NEW USER
 ====================================================== */
-router.post("/", async (req, res) => {
+router.post("/", validate(userCreateSchema), async (req, res) => {
   const { name, role, status } = req.body;
-
-  if (!name || !role || !status) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
 
   try {
     const result = await pool.query(
@@ -129,7 +128,7 @@ router.post("/", async (req, res) => {
 /* ======================================================
    UPDATE USER DETAILS
 ====================================================== */
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const { name, role, status } = req.body;
 

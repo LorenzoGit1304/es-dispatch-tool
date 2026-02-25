@@ -1,12 +1,14 @@
 import { Router } from "express";
 import pool from "../config/db";
+import { validate } from "../middleware/validate";
+import { enrollmentCreateSchema } from "../schemas/requestSchemas";
 
 const router = Router();
 
 /* ======================================================
    CREATE ENROLLMENT + DISPATCH OFFER (with BUSY fallback)
 ====================================================== */
-router.post("/", async (req, res) => {
+router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
   const { premise_id, requested_by, timeslot } = req.body;
 
   const client = await pool.connect();
