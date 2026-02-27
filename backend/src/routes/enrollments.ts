@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db";
 import { validate } from "../middleware/validate";
 import { enrollmentCreateSchema } from "../schemas/requestSchemas";
+import { apiError } from "../utils/apiError";
 
 const router = Router();
 
@@ -51,7 +52,7 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
       if (esResult.rows.length === 0) {
         // 🔹 No ES at all → rollback
         await client.query("ROLLBACK");
-        return res.status(400).json({ error: "No ES available for assignment" });
+        return apiError(res, 400, "No ES available for assignment", "NO_ES_AVAILABLE");
       }
 
       queuedForBusy = true;
@@ -92,7 +93,7 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Enrollment creation error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   } finally {
     client.release();
   }
@@ -117,14 +118,14 @@ router.post("/:id/complete", async (req, res) => {
 
     if (enrollmentResult.rows.length === 0) {
       await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Enrollment not found" });
+      return apiError(res, 404, "Enrollment not found", "ENROLLMENT_NOT_FOUND");
     }
 
     const enrollment = enrollmentResult.rows[0];
 
     if (enrollment.status !== "ASSIGNED") {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Enrollment is not assigned" });
+      return apiError(res, 400, "Enrollment is not assigned", "ENROLLMENT_NOT_ASSIGNED");
     }
 
     // 1️⃣ Mark enrollment as COMPLETED
@@ -150,7 +151,7 @@ router.post("/:id/complete", async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Complete enrollment error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   } finally {
     client.release();
   }
@@ -168,7 +169,7 @@ router.get("/", async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error("Fetch enrollments error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 

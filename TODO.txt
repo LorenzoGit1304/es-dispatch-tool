@@ -1,7 +1,7 @@
 - [x] Phase 1 complete through step 1.4 (Backend fixes + Clerk auth + clerk_id linking).
 - [x] Phase 2.1 Install Zod and add reusable validate middleware (`src/middleware/validate.ts`).
 - [x] Phase 2.2 Add schemas for all write endpoints (`/enrollments`, `/users`, `/users/:id`, `/users/:id/status`, `/users/sync`).
-- [ ] Phase 2.3 Standardize error format and add shared API error helper.
+- [x] Phase 2.3 Standardize error format and add shared API error helper.
 - [ ] Phase 3 Set up `node-pg-migrate` and convert SQL files to migration scripts.
 - [ ] Phase 4 Add missing detail endpoints and pagination for list routes.
 - [ ] Phase 5 Add audit log table + write tracking on all mutations.

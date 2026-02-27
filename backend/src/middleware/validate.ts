@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { ZodError, ZodTypeAny } from "zod";
+import { apiError } from "../utils/apiError";
 
 type ValidateTarget = "body" | "params" | "query";
 
@@ -22,12 +23,13 @@ export const validate = (schema: ZodTypeAny, target: ValidateTarget = "body") =>
     const parsed = schema.safeParse(req[target]);
 
     if (!parsed.success) {
-      return res.status(400).json({
-        error: "Validation failed",
-        details: {
-          fieldErrors: mapZodIssuesToFieldErrors(parsed.error),
-        },
-      });
+      return apiError(
+        res,
+        400,
+        "Validation failed",
+        "VALIDATION_FAILED",
+        { fieldErrors: mapZodIssuesToFieldErrors(parsed.error) }
+      );
     }
 
     (req as Request)[target] = parsed.data;

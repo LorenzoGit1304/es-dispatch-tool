@@ -1,5 +1,6 @@
 import { Router } from "express";
 import pool from "../config/db";
+import { apiError } from "../utils/apiError";
 
 const router = Router();
 
@@ -27,7 +28,7 @@ router.post("/:id/accept", async (req, res) => {
 
     if (acceptResult.rows.length === 0) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Offer already processed or not found" });
+      return apiError(res, 400, "Offer already processed or not found", "OFFER_NOT_PENDING");
     }
 
     const offer = acceptResult.rows[0];
@@ -57,7 +58,7 @@ router.post("/:id/accept", async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Accept error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   } finally {
     client.release();
   }
@@ -84,14 +85,14 @@ router.post("/:id/reject", async (req, res) => {
 
     if (offerResult.rows.length === 0) {
       await client.query("ROLLBACK");
-      return res.status(404).json({ error: "Offer not found" });
+      return apiError(res, 404, "Offer not found", "OFFER_NOT_FOUND");
     }
 
     const offer = offerResult.rows[0];
 
     if (offer.status !== "PENDING") {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "Offer already processed" });
+      return apiError(res, 400, "Offer already processed", "OFFER_ALREADY_PROCESSED");
     }
 
     // 2️⃣ Mark current offer REJECTED
@@ -116,7 +117,7 @@ router.post("/:id/reject", async (req, res) => {
 
     if (nextESResult.rows.length === 0) {
       await client.query("COMMIT"); // rejection is valid even without reassignment
-      return res.status(400).json({ error: "No other available ES" });
+      return apiError(res, 400, "No other available ES", "NO_OTHER_ES_AVAILABLE");
     }
 
     const nextES = nextESResult.rows[0];
@@ -149,7 +150,7 @@ router.post("/:id/reject", async (req, res) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Reject error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   } finally {
     client.release();
   }
@@ -167,7 +168,7 @@ router.get("/", async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error("Fetch offers error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 

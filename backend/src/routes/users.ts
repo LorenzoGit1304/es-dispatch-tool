@@ -1,6 +1,7 @@
 import { Router } from "express";
 import pool from "../config/db";
 import { validate } from "../middleware/validate";
+import { apiError } from "../utils/apiError";
 import {
   idParamSchema,
   userCreateSchema,
@@ -18,12 +19,12 @@ router.post("/sync", validate(userSyncSchema), async (req, res) => {
   const clerkId = (req as any).auth?.userId;
 
   if (!clerkId) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return apiError(res, 401, "Unauthorized", "UNAUTHORIZED");
   }
 
   const { clerk_id, email, name } = req.body;
   if (clerk_id !== clerkId) {
-    return res.status(400).json({ error: "clerk_id does not match authenticated user" });
+    return apiError(res, 400, "clerk_id does not match authenticated user", "CLERK_ID_MISMATCH");
   }
 
   try {
@@ -48,7 +49,7 @@ router.post("/sync", validate(userSyncSchema), async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("Sync error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -62,7 +63,7 @@ router.get("/", async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error("Fetch users error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -76,11 +77,11 @@ router.get("/:id", async (req, res) => {
       "SELECT id, name, role, status, last_assigned_at FROM users WHERE id = $1",
       [id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Fetch user error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -97,11 +98,11 @@ router.patch("/:id/status", validate(idParamSchema, "params"), validate(userStat
       "UPDATE users SET status = $1 WHERE id = $2 RETURNING id, name, role, status, last_assigned_at",
       [status, id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Update user status error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -121,7 +122,7 @@ router.post("/", validate(userCreateSchema), async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error("Create user error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -142,11 +143,11 @@ router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema)
        RETURNING id, name, role, status, last_assigned_at`,
       [name, role, status, id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Update user error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -157,11 +158,11 @@ router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query("DELETE FROM users WHERE id = $1 RETURNING id", [id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: "User not found" });
+    if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
     res.json({ message: "User deleted successfully", id: result.rows[0].id });
   } catch (error) {
     console.error("Delete user error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
