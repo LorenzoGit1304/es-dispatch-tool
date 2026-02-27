@@ -1,0 +1,19 @@
+exports.up = (pgm) => {
+  pgm.sql(`
+    CREATE TABLE users (
+      id SERIAL PRIMARY KEY,
+      clerk_id VARCHAR(255) UNIQUE NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      role VARCHAR(20) NOT NULL CHECK (role IN ('ES', 'AS', 'ADMIN')),
+      language VARCHAR(50),
+      status VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE',
+      last_assigned_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+};
+
+exports.down = (pgm) => {
+  pgm.sql("DROP TABLE IF EXISTS users CASCADE;");
+};
