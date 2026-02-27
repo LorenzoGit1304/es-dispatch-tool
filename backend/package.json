@@ -9,6 +9,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:cli": "psql -h localhost -U dispatch_user -d es_dispatch",
+    "migrate:up": "node-pg-migrate up --config-file node-pg-migrate.config.js",
+    "migrate:down": "node-pg-migrate down --config-file node-pg-migrate.config.js",
+    "migrate:create": "node-pg-migrate create --config-file node-pg-migrate.config.js",
     "lint": "eslint . --ext .ts",
     "typecheck": "tsc --noEmit"
   },
@@ -23,6 +26,7 @@
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "node-cron": "^3.0.3",
+    "node-pg-migrate": "^7.9.1",
     "pg": "^8.18.0",
     "zod": "^4.3.6"
   },
