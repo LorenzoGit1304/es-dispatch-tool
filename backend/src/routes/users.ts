@@ -4,6 +4,7 @@ import { validate } from "../middleware/validate";
 import { apiError } from "../utils/apiError";
 import {
   idParamSchema,
+  paginationQuerySchema,
   userCreateSchema,
   userStatusUpdateSchema,
   userSyncSchema,
@@ -57,10 +58,31 @@ router.post("/sync", validate(userSyncSchema), async (req, res) => {
 /* ======================================================
    LIST ALL USERS
 ====================================================== */
-router.get("/", async (req, res) => {
+router.get("/", validate(paginationQuerySchema, "query"), async (req, res) => {
+  const { page, limit } = req.query as unknown as { page: number; limit: number };
+  const offset = (page - 1) * limit;
+
   try {
-    const result = await pool.query("SELECT id, name, role, status, last_assigned_at FROM users ORDER BY id");
-    res.json(result.rows);
+    const countResult = await pool.query("SELECT COUNT(*)::int AS total FROM users");
+    const total = countResult.rows[0]?.total ?? 0;
+
+    const result = await pool.query(
+      `SELECT id, name, role, status, last_assigned_at
+       FROM users
+       ORDER BY id
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    return res.json({
+      data: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
   } catch (error) {
     console.error("Fetch users error:", error);
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");

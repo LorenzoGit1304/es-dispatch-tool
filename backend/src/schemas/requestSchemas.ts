@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const roleSchema = z.enum(["ES", "AS", "ADMIN"]);
 const statusSchema = z.enum(["AVAILABLE", "BUSY", "UNAVAILABLE"]);
+const enrollmentStatusSchema = z.enum(["WAITING", "ASSIGNED", "COMPLETED"]);
 
 export const enrollmentCreateSchema = z.object({
   premise_id: z.string().min(1),
@@ -33,4 +34,13 @@ export const userSyncSchema = z.object({
 
 export const idParamSchema = z.object({
   id: z.coerce.number().int().positive(),
+});
+
+export const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const enrollmentListQuerySchema = paginationQuerySchema.extend({
+  status: enrollmentStatusSchema.optional(),
 });

@@ -1,6 +1,8 @@
 import { Router } from "express";
 import pool from "../config/db";
 import { apiError } from "../utils/apiError";
+import { validate } from "../middleware/validate";
+import { idParamSchema, paginationQuerySchema } from "../schemas/requestSchemas";
 
 const router = Router();
 
@@ -158,14 +160,63 @@ router.post("/:id/reject", async (req, res) => {
 
 
 /* ======================================================
-   LIST OFFERS
+   GET SINGLE OFFER
 ====================================================== */
-router.get("/", async (req, res) => {
+router.get("/:id", validate(idParamSchema, "params"), async (req, res) => {
+  const { id } = req.params;
+
   try {
     const result = await pool.query(
-      `SELECT * FROM enrollment_offers ORDER BY created_at DESC`
+      `SELECT o.*,
+              u.name AS es_name,
+              u.email AS es_email,
+              e.status AS enrollment_status
+       FROM enrollment_offers o
+       JOIN users u ON u.id = o.es_id
+       JOIN enrollments e ON e.id = o.enrollment_id
+       WHERE o.id = $1`,
+      [id]
     );
-    res.json(result.rows);
+
+    if (result.rows.length === 0) {
+      return apiError(res, 404, "Offer not found", "OFFER_NOT_FOUND");
+    }
+
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Fetch offer detail error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
+
+/* ======================================================
+   LIST OFFERS
+====================================================== */
+router.get("/", validate(paginationQuerySchema, "query"), async (req, res) => {
+  const { page, limit } = req.query as unknown as { page: number; limit: number };
+  const offset = (page - 1) * limit;
+
+  try {
+    const countResult = await pool.query("SELECT COUNT(*)::int AS total FROM enrollment_offers");
+    const total = countResult.rows[0]?.total ?? 0;
+
+    const result = await pool.query(
+      `SELECT *
+       FROM enrollment_offers
+       ORDER BY offered_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    return res.json({
+      data: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
   } catch (error) {
     console.error("Fetch offers error:", error);
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
