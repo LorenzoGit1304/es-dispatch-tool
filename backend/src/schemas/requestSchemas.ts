@@ -3,10 +3,16 @@ import { z } from "zod";
 const roleSchema = z.enum(["ES", "AS", "ADMIN"]);
 const statusSchema = z.enum(["AVAILABLE", "BUSY", "UNAVAILABLE"]);
 const enrollmentStatusSchema = z.enum(["WAITING", "ASSIGNED", "COMPLETED"]);
+const languageSchema = z.enum(["English", "Spanish", "Both"]);
 
 export const enrollmentCreateSchema = z.object({
   premise_id: z.string().min(1),
   requested_by: z.number().int().positive(),
+  timeslot: z.string().min(1),
+});
+
+export const asEnrollmentRequestSchema = z.object({
+  premise_id: z.string().min(1),
   timeslot: z.string().min(1),
 });
 
@@ -26,6 +32,10 @@ export const userStatusUpdateSchema = z.object({
   status: statusSchema,
 });
 
+export const userLanguageUpdateSchema = z.object({
+  language: languageSchema,
+});
+
 export const userSyncSchema = z.object({
   clerk_id: z.string().min(1),
   email: z.string().email(),
@@ -43,4 +53,10 @@ export const paginationQuerySchema = z.object({
 
 export const enrollmentListQuerySchema = paginationQuerySchema.extend({
   status: enrollmentStatusSchema.optional(),
+});
+
+export const auditLogQuerySchema = paginationQuerySchema.extend({
+  action: z.string().min(1).optional(),
+  entity_type: z.string().min(1).optional(),
+  actor_clerk_id: z.string().min(1).optional(),
 });

@@ -13,6 +13,7 @@ import enrollmentRoutes from "./routes/enrollments";
 import offerRoutes from "./routes/offers";
 import userRoutes from "./routes/users";
 import authDebugRoutes from "./routes/authDebug";
+import auditLogRoutes from "./routes/auditLog";
 
 import pool from "./config/db";
 import "./jobs/offerTimeoutJob";
@@ -48,6 +49,7 @@ if (process.env.NODE_ENV !== "production" && process.env.AUTH_DEBUG_BYPASS === "
 app.use("/enrollments", requireAuth, enrollmentRoutes);
 app.use("/offers", requireAuth, offerRoutes);
 app.use("/users", requireAuth, userRoutes);
+app.use("/audit-log", requireAuth, auditLogRoutes);
 
 const PORT = Number(process.env.PORT ?? 4000);
 

@@ -3,10 +3,13 @@ import pool from "../config/db";
 import { validate } from "../middleware/validate";
 import { apiError } from "../utils/apiError";
 import { getActorUserId, logAuditEvent } from "../utils/auditLog";
+import { requireRole } from "../middleware/requireRole";
+import { getAuthenticatedClerkId, getAuthenticatedDbUser } from "../utils/authenticatedUser";
 import {
   idParamSchema,
   paginationQuerySchema,
   userCreateSchema,
+  userLanguageUpdateSchema,
   userStatusUpdateSchema,
   userSyncSchema,
   userUpdateSchema,
@@ -66,9 +69,101 @@ router.post("/sync", validate(userSyncSchema), async (req, res) => {
 
 
 /* ======================================================
+   CURRENT AUTHENTICATED USER PROFILE
+====================================================== */
+router.get("/me", async (req, res) => {
+  try {
+    const currentUser = await getAuthenticatedDbUser(req, pool);
+    if (!currentUser) {
+      return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+    }
+    return res.json(currentUser);
+  } catch (error) {
+    console.error("Fetch current user error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
+
+/* ======================================================
+   ES SELF-SERVICE: UPDATE LANGUAGE
+====================================================== */
+router.patch("/me/language", requireRole("ES"), validate(userLanguageUpdateSchema), async (req, res) => {
+  const actorClerkId = getAuthenticatedClerkId(req);
+  const { language } = req.body;
+
+  try {
+    const currentUser = await getAuthenticatedDbUser(req, pool);
+    if (!currentUser) {
+      return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET language = $1
+       WHERE id = $2
+       RETURNING id, clerk_id, name, email, role, language, status`,
+      [language, currentUser.id]
+    );
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: currentUser.id,
+      action: "USER_LANGUAGE_UPDATED",
+      entityType: "user",
+      entityId: currentUser.id,
+      before: { language: currentUser.language },
+      after: { language: result.rows[0].language },
+    });
+
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Update current user language error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
+
+/* ======================================================
+   ES SELF-SERVICE: UPDATE STATUS
+====================================================== */
+router.patch("/me/status", requireRole("ES"), validate(userStatusUpdateSchema), async (req, res) => {
+  const actorClerkId = getAuthenticatedClerkId(req);
+  const { status } = req.body;
+
+  try {
+    const currentUser = await getAuthenticatedDbUser(req, pool);
+    if (!currentUser) {
+      return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET status = $1
+       WHERE id = $2
+       RETURNING id, clerk_id, name, email, role, language, status`,
+      [status, currentUser.id]
+    );
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: currentUser.id,
+      action: "USER_SELF_STATUS_UPDATED",
+      entityType: "user",
+      entityId: currentUser.id,
+      before: { status: currentUser.status },
+      after: { status: result.rows[0].status },
+    });
+
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Update current user status error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
+
+/* ======================================================
    LIST ALL USERS
 ====================================================== */
-router.get("/", validate(paginationQuerySchema, "query"), async (req, res) => {
+router.get("/", requireRole("ADMIN"), validate(paginationQuerySchema, "query"), async (req, res) => {
   const { page, limit } = req.query as unknown as { page: number; limit: number };
   const offset = (page - 1) * limit;
 
@@ -102,7 +197,7 @@ router.get("/", validate(paginationQuerySchema, "query"), async (req, res) => {
 /* ======================================================
    GET SINGLE USER
 ====================================================== */
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireRole("ADMIN"), async (req, res) => {
   const { id } = req.params;
   try {
     const result = await pool.query(
@@ -121,7 +216,12 @@ router.get("/:id", async (req, res) => {
    UPDATE USER STATUS
    (e.g., AVAILABLE, BUSY, UNAVAILABLE)
 ====================================================== */
-router.patch("/:id/status", validate(idParamSchema, "params"), validate(userStatusUpdateSchema), async (req, res) => {
+router.patch(
+  "/:id/status",
+  requireRole("ADMIN"),
+  validate(idParamSchema, "params"),
+  validate(userStatusUpdateSchema),
+  async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   const actorClerkId = (req as any).auth?.userId ?? null;
@@ -153,12 +253,13 @@ router.patch("/:id/status", validate(idParamSchema, "params"), validate(userStat
     console.error("Update user status error:", error);
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
-});
+  }
+);
 
 /* ======================================================
    CREATE NEW USER
 ====================================================== */
-router.post("/", validate(userCreateSchema), async (req, res) => {
+router.post("/", requireRole("ADMIN"), validate(userCreateSchema), async (req, res) => {
   const { name, role, status } = req.body;
   const actorClerkId = (req as any).auth?.userId ?? null;
 
@@ -189,7 +290,12 @@ router.post("/", validate(userCreateSchema), async (req, res) => {
 /* ======================================================
    UPDATE USER DETAILS
 ====================================================== */
-router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema), async (req, res) => {
+router.put(
+  "/:id",
+  requireRole("ADMIN"),
+  validate(idParamSchema, "params"),
+  validate(userUpdateSchema),
+  async (req, res) => {
   const { id } = req.params;
   const { name, role, status } = req.body;
   const actorClerkId = (req as any).auth?.userId ?? null;
@@ -226,12 +332,13 @@ router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema)
     console.error("Update user error:", error);
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
-});
+  }
+);
 
 /* ======================================================
    DELETE USER
 ====================================================== */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireRole("ADMIN"), async (req, res) => {
   const { id } = req.params;
   const actorClerkId = (req as any).auth?.userId ?? null;
   try {
@@ -249,7 +356,7 @@ router.delete("/:id", async (req, res) => {
       actorUserId: await getActorUserId(pool, actorClerkId),
       action: "USER_DELETED",
       entityType: "user",
-      entityId: id,
+      entityId: String(id),
       before: beforeResult.rows[0],
       after: null,
     });

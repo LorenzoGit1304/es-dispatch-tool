@@ -2,38 +2,36 @@ import { Router } from "express";
 import pool from "../config/db";
 import { validate } from "../middleware/validate";
 import {
+  asEnrollmentRequestSchema,
   enrollmentCreateSchema,
   enrollmentListQuerySchema,
   idParamSchema,
 } from "../schemas/requestSchemas";
 import { apiError } from "../utils/apiError";
 import { getActorUserId, logAuditEvent } from "../utils/auditLog";
+import { requireRole } from "../middleware/requireRole";
+import { getAuthenticatedClerkId, getAuthenticatedDbUser } from "../utils/authenticatedUser";
 
 const router = Router();
 
-/* ======================================================
-   CREATE ENROLLMENT + DISPATCH OFFER (with BUSY fallback)
-====================================================== */
-router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
-  const { premise_id, requested_by, timeslot } = req.body;
-  const actorClerkId = (req as any).auth?.userId ?? null;
-
+const createEnrollmentAndDispatch = async (
+  premiseId: string,
+  requestedBy: number,
+  timeslot: string
+) => {
   const client = await pool.connect();
-
   try {
     await client.query("BEGIN");
 
-    // 1️⃣ Create enrollment
     const enrollmentResult = await client.query(
       `INSERT INTO enrollments (premise_id, requested_by, timeslot)
        VALUES ($1, $2, $3)
        RETURNING *`,
-      [premise_id, requested_by, timeslot]
+      [premiseId, requestedBy, timeslot]
     );
 
     const enrollment = enrollmentResult.rows[0];
 
-    // 2️⃣ Find fairest AVAILABLE ES first
     let esResult = await client.query(
       `SELECT * FROM users
        WHERE role = 'ES'
@@ -43,10 +41,9 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
     );
 
     let selectedES;
-    let queuedForBusy = false; // 🔹 flag if we assign to BUSY ES
+    let queuedForBusy = false;
 
     if (esResult.rows.length === 0) {
-      // 🔹 No AVAILABLE ES → fallback to fairest BUSY ES
       esResult = await client.query(
         `SELECT * FROM users
          WHERE role = 'ES'
@@ -56,9 +53,8 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
       );
 
       if (esResult.rows.length === 0) {
-        // 🔹 No ES at all → rollback
         await client.query("ROLLBACK");
-        return apiError(res, 400, "No ES available for assignment", "NO_ES_AVAILABLE");
+        return { error: "NO_ES_AVAILABLE" as const };
       }
 
       queuedForBusy = true;
@@ -66,18 +62,15 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
 
     selectedES = esResult.rows[0];
 
-    // 3️⃣ Create offer (expires in 5 minutes)
     const offerResult = await client.query(
-      `INSERT INTO enrollment_offers 
+      `INSERT INTO enrollment_offers
        (enrollment_id, es_id, expires_at)
        VALUES ($1, $2, NOW() + INTERVAL '5 minutes')
        RETURNING *`,
       [enrollment.id, selectedES.id]
     );
-
     const offer = offerResult.rows[0];
 
-    // 4️⃣ Update fairness timestamp ONLY if ES is AVAILABLE
     if (!queuedForBusy) {
       await client.query(
         `UPDATE users
@@ -88,6 +81,28 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
     }
 
     await client.query("COMMIT");
+    return { enrollment, selectedES, offer, queuedForBusy };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+/* ======================================================
+   CREATE ENROLLMENT + DISPATCH OFFER (ADMIN)
+====================================================== */
+router.post("/", requireRole("ADMIN"), validate(enrollmentCreateSchema), async (req, res) => {
+  const { premise_id, requested_by, timeslot } = req.body;
+  const actorClerkId = getAuthenticatedClerkId(req);
+
+  try {
+    const creation = await createEnrollmentAndDispatch(premise_id, requested_by, timeslot);
+    if ("error" in creation) {
+      return apiError(res, 400, "No ES available for assignment", "NO_ES_AVAILABLE");
+    }
+    const { enrollment, selectedES, offer, queuedForBusy } = creation;
 
     await logAuditEvent({
       actorClerkId,
@@ -103,29 +118,73 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
       },
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       enrollment,
       offered_to: selectedES.name,
       offer,
-      queued_for_busy: queuedForBusy // 🔹 optional info for frontend
+      queued_for_busy: queuedForBusy,
     });
-
   } catch (error) {
-    await client.query("ROLLBACK");
     console.error("Enrollment creation error:", error);
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
-  } finally {
-    client.release();
   }
 });
 
+/* ======================================================
+   AS REQUEST TRANSFER (SELF OWNED)
+====================================================== */
+router.post("/request", requireRole("AS"), validate(asEnrollmentRequestSchema), async (req, res) => {
+  const actorClerkId = getAuthenticatedClerkId(req);
+  const currentUser = await getAuthenticatedDbUser(req, pool);
+  if (!currentUser) {
+    return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+  }
+
+  const { premise_id, timeslot } = req.body;
+
+  try {
+    const creation = await createEnrollmentAndDispatch(premise_id, currentUser.id, timeslot);
+    if ("error" in creation) {
+      return apiError(res, 400, "No ES available for assignment", "NO_ES_AVAILABLE");
+    }
+    const { enrollment, selectedES, offer, queuedForBusy } = creation;
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: currentUser.id,
+      action: "AS_TRANSFER_REQUEST_CREATED",
+      entityType: "enrollment",
+      entityId: enrollment.id,
+      after: enrollment,
+      metadata: {
+        offerId: offer.id,
+        offeredToEsId: selectedES.id,
+        queuedForBusy,
+      },
+    });
+
+    return res.status(201).json({
+      enrollment,
+      offered_to: selectedES.name,
+      offer,
+      queued_for_busy: queuedForBusy,
+    });
+  } catch (error) {
+    console.error("AS transfer request error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
 
 /* ======================================================
    COMPLETE ENROLLMENT
 ====================================================== */
-router.post("/:id/complete", async (req, res) => {
+router.post("/:id/complete", requireRole("AS", "ADMIN"), async (req, res) => {
   const { id } = req.params;
-  const actorClerkId = (req as any).auth?.userId ?? null;
+  const actorClerkId = getAuthenticatedClerkId(req);
+  const currentUser = await getAuthenticatedDbUser(req, pool);
+  if (!currentUser) {
+    return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+  }
 
   const client = await pool.connect();
 
@@ -144,12 +203,16 @@ router.post("/:id/complete", async (req, res) => {
 
     const enrollment = enrollmentResult.rows[0];
 
+    if (currentUser.role === "AS" && enrollment.requested_by !== currentUser.id) {
+      await client.query("ROLLBACK");
+      return apiError(res, 403, "Forbidden", "FORBIDDEN");
+    }
+
     if (enrollment.status !== "ASSIGNED") {
       await client.query("ROLLBACK");
       return apiError(res, 400, "Enrollment is not assigned", "ENROLLMENT_NOT_ASSIGNED");
     }
 
-    // 1️⃣ Mark enrollment as COMPLETED
     const completedResult = await client.query(
       `UPDATE enrollments
        SET status = 'COMPLETED'
@@ -158,7 +221,6 @@ router.post("/:id/complete", async (req, res) => {
       [id]
     );
 
-    // 2️⃣ Free the assigned ES
     const freedEsResult = await client.query(
       `UPDATE users
        SET status = 'AVAILABLE'
@@ -174,7 +236,7 @@ router.post("/:id/complete", async (req, res) => {
       actorUserId: await getActorUserId(pool, actorClerkId),
       action: "ENROLLMENT_COMPLETED",
       entityType: "enrollment",
-      entityId: id,
+      entityId: String(id),
       before: enrollment,
       after: completedResult.rows[0],
       metadata: {
@@ -183,8 +245,7 @@ router.post("/:id/complete", async (req, res) => {
       },
     });
 
-    res.json({ message: "Enrollment completed successfully" });
-
+    return res.json({ message: "Enrollment completed successfully" });
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Complete enrollment error:", error);
@@ -194,12 +255,15 @@ router.post("/:id/complete", async (req, res) => {
   }
 });
 
-
 /* ======================================================
    GET SINGLE ENROLLMENT + OFFER HISTORY
 ====================================================== */
 router.get("/:id", validate(idParamSchema, "params"), async (req, res) => {
   const { id } = req.params;
+  const currentUser = await getAuthenticatedDbUser(req, pool);
+  if (!currentUser) {
+    return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+  }
 
   try {
     const enrollmentResult = await pool.query(
@@ -217,6 +281,14 @@ router.get("/:id", validate(idParamSchema, "params"), async (req, res) => {
       return apiError(res, 404, "Enrollment not found", "ENROLLMENT_NOT_FOUND");
     }
 
+    const enrollment = enrollmentResult.rows[0];
+    const isOwnerAs = currentUser.role === "AS" && enrollment.requested_by === currentUser.id;
+    const isAssignedEs = currentUser.role === "ES" && enrollment.assigned_es_id === currentUser.id;
+    const isAdmin = currentUser.role === "ADMIN";
+    if (!(isOwnerAs || isAssignedEs || isAdmin)) {
+      return apiError(res, 403, "Forbidden", "FORBIDDEN");
+    }
+
     const offersResult = await pool.query(
       `SELECT o.*, u.name AS es_name, u.email AS es_email
        FROM enrollment_offers o
@@ -227,7 +299,7 @@ router.get("/:id", validate(idParamSchema, "params"), async (req, res) => {
     );
 
     return res.json({
-      ...enrollmentResult.rows[0],
+      ...enrollment,
       offers: offersResult.rows,
     });
   } catch (error) {
@@ -237,9 +309,65 @@ router.get("/:id", validate(idParamSchema, "params"), async (req, res) => {
 });
 
 /* ======================================================
-   LIST ENROLLMENTS
+   AS: LIST MY REQUESTED ENROLLMENTS
 ====================================================== */
-router.get("/", validate(enrollmentListQuerySchema, "query"), async (req, res) => {
+router.get("/my/requests", requireRole("AS"), validate(enrollmentListQuerySchema, "query"), async (req, res) => {
+  const currentUser = await getAuthenticatedDbUser(req, pool);
+  if (!currentUser) {
+    return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+  }
+
+  const { page, limit, status } = req.query as unknown as {
+    page: number;
+    limit: number;
+    status?: "WAITING" | "ASSIGNED" | "COMPLETED";
+  };
+  const offset = (page - 1) * limit;
+
+  const params: Array<string | number> = [currentUser.id];
+  let whereClause = "WHERE requested_by = $1";
+  if (status) {
+    params.push(status);
+    whereClause += ` AND status = $${params.length}`;
+  }
+
+  try {
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM enrollments ${whereClause}`,
+      params
+    );
+    const total = countResult.rows[0]?.total ?? 0;
+
+    const dataParams = [...params, limit, offset];
+    const result = await pool.query(
+      `SELECT *
+       FROM enrollments
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
+    );
+
+    return res.json({
+      data: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Fetch my enrollments error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
+
+/* ======================================================
+   LIST ENROLLMENTS (ADMIN)
+====================================================== */
+router.get("/", requireRole("ADMIN"), validate(enrollmentListQuerySchema, "query"), async (req, res) => {
   const { page, limit, status } = req.query as unknown as {
     page: number;
     limit: number;

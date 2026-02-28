@@ -9,6 +9,6 @@
 - [ ] Phase 6.2 ADMIN views: users/status management + audit log screen + maintenance overview.
 - [ ] Phase 6.3 ES views: language selection, status controls, active assignments/offers.
 - [ ] Phase 6.4 AS views: create transfer request (premise_id + timeslot) and tracking history.
-- [ ] Phase 6.5 Backend support for frontend role UX (ownership-scoped endpoints + stricter role guards).
+- [x] Phase 6.5 Backend support for frontend role UX (ownership-scoped endpoints + stricter role guards).
 - [ ] Phase 7 Add automated tests (dispatch fairness, race conditions, auth/role + core frontend flows).
 - [ ] Phase 8 Railway deployment pipeline + health monitoring + runbook checks.
