@@ -8,29 +8,28 @@ Dispatch workflow for handling enrollment transfer requests and routing them to 
 
 ## Current stage
 
-Project status is updated to **completed through Phase 1.4** from `ES_Dispatch_Dev_Plan.docx.pdf`.
+Project status is updated to **completed through Phase 5**, with **Phase 6 (frontend)** in progress.
 
 Completed so far:
 - Core dispatch, fallback assignment, offer lifecycle, timeout job, user CRUD.
-- DB hardening and indexing migrations (`001` to `006`).
+- DB hardening and indexing migrations, plus migration tooling (`node-pg-migrate`).
 - Health route correctly mounted.
 - Clerk auth integrated (`clerkMiddleware`, protected route mounts, auth middleware flow).
-- Clerk identity linking implemented (`users.clerk_id`, `email`, `/users/sync`, `requireRole` middleware scaffolding).
+- Clerk identity linking implemented (`users.clerk_id`, `email`, `/users/sync`, `requireRole` middleware).
+- Validation + standardized API error contracts implemented.
+- Missing detail endpoints, pagination, and enrollment status filtering implemented.
+- Audit log migration and write-tracking integrated into mutating routes.
+- Frontend scaffold created (React + Vite + Clerk + protected routing + initial dashboard + `/users/sync` bootstrap).
 
 Active focus now:
-- **Phase 2: Validation & Error Contracts**.
+- **Phase 6: role-based frontend implementation**.
 
 
 ## Backend setup
 
 1. Create database and apply SQL files in order:
-   - `backend/sql/001_create_users.sql`
-   - `backend/sql/002_create_enrollments.sql`
-   - `backend/sql/003_create_enrollment_offers.sql`
-   - `backend/sql/004_create_indexes.sql`
-   - `backend/sql/005_seed_data.sql`
-   - `backend/sql/006_hardening_updates.sql`
-   - `backend/sql/007_add_clerk_fiels.sql`
+   - Prefer migration tooling:
+   - `cd backend && npm run migrate:up`
 2. Add `backend/.env`:
 
 ```env
@@ -63,10 +62,31 @@ npm run dev
 
 Frontend expects backend at `http://localhost:4000`.
 
+Frontend `.env` (required):
+
+```env
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_key_here
+VITE_API_BASE_URL=http://localhost:4000
+```
+
+## Frontend role plan (Phase 6)
+
+1. `ADMIN` panel:
+   - user/status management
+   - maintenance view
+   - audit/log access
+2. `ES` account:
+   - language selection (`English`, `Spanish`, `Both`)
+   - landing page with status and assigned/pending work
+   - status update controls and offer actions
+3. `AS` account:
+   - transfer request flow (premise ID + timeslot)
+   - transfer tracking (requested, accepted, by whom)
+   - transfer completion action when accepted
+
 ## Next milestones
 
-1. Phase 2: add request validation with Zod + standard error contracts.
-2. Phase 3: move to migration tooling (`node-pg-migrate`).
-3. Phase 4: fill missing endpoints and add pagination.
-4. Phase 5: add audit log for all mutating operations.
-5. Phase 6-8: frontend completion, test suite, and Railway production deploy.
+1. Phase 6: implement role-based frontend pages (`ADMIN`, `ES`, `AS`) and navigation.
+2. Phase 6: add backend ownership/role guard enhancements required by UI flows.
+3. Phase 7: add automated tests (auth/role, dispatch flows, race conditions).
+4. Phase 8: production deployment hardening (Railway pipeline, monitoring, runbooks).
