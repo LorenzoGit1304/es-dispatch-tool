@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../config/db";
 import { validate } from "../middleware/validate";
 import { apiError } from "../utils/apiError";
+import { getActorUserId, logAuditEvent } from "../utils/auditLog";
 import {
   idParamSchema,
   paginationQuerySchema,
@@ -46,6 +47,15 @@ router.post("/sync", validate(userSyncSchema), async (req, res) => {
        RETURNING id, name, role, status, clerk_id, email`,
       [name, email, clerkId]
     );
+
+    await logAuditEvent({
+      actorClerkId: clerkId,
+      actorUserId: result.rows[0].id,
+      action: "USER_SYNC_CREATED",
+      entityType: "user",
+      entityId: result.rows[0].id,
+      after: result.rows[0],
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -114,13 +124,30 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id/status", validate(idParamSchema, "params"), validate(userStatusUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+  const actorClerkId = (req as any).auth?.userId ?? null;
 
   try {
+    const beforeResult = await pool.query(
+      "SELECT id, name, role, status, last_assigned_at FROM users WHERE id = $1",
+      [id]
+    );
+    if (beforeResult.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
     const result = await pool.query(
       "UPDATE users SET status = $1 WHERE id = $2 RETURNING id, name, role, status, last_assigned_at",
       [status, id]
     );
-    if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "USER_STATUS_UPDATED",
+      entityType: "user",
+      entityId: String(id),
+      before: beforeResult.rows[0],
+      after: result.rows[0],
+    });
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Update user status error:", error);
@@ -133,6 +160,7 @@ router.patch("/:id/status", validate(idParamSchema, "params"), validate(userStat
 ====================================================== */
 router.post("/", validate(userCreateSchema), async (req, res) => {
   const { name, role, status } = req.body;
+  const actorClerkId = (req as any).auth?.userId ?? null;
 
   try {
     const result = await pool.query(
@@ -141,6 +169,16 @@ router.post("/", validate(userCreateSchema), async (req, res) => {
        RETURNING id, name, role, status, last_assigned_at`,
       [name, role, status]
     );
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "USER_CREATED",
+      entityType: "user",
+      entityId: result.rows[0].id,
+      after: result.rows[0],
+    });
+
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error("Create user error:", error);
@@ -154,8 +192,15 @@ router.post("/", validate(userCreateSchema), async (req, res) => {
 router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const { name, role, status } = req.body;
+  const actorClerkId = (req as any).auth?.userId ?? null;
 
   try {
+    const beforeResult = await pool.query(
+      "SELECT id, name, role, status, last_assigned_at FROM users WHERE id = $1",
+      [id]
+    );
+    if (beforeResult.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
     const result = await pool.query(
       `UPDATE users
        SET name = COALESCE($1, name),
@@ -165,7 +210,17 @@ router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema)
        RETURNING id, name, role, status, last_assigned_at`,
       [name, role, status, id]
     );
-    if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "USER_UPDATED",
+      entityType: "user",
+      entityId: String(id),
+      before: beforeResult.rows[0],
+      after: result.rows[0],
+    });
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Update user error:", error);
@@ -178,9 +233,27 @@ router.put("/:id", validate(idParamSchema, "params"), validate(userUpdateSchema)
 ====================================================== */
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
+  const actorClerkId = (req as any).auth?.userId ?? null;
   try {
+    const beforeResult = await pool.query(
+      "SELECT id, name, role, status, last_assigned_at FROM users WHERE id = $1",
+      [id]
+    );
+    if (beforeResult.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
     const result = await pool.query("DELETE FROM users WHERE id = $1 RETURNING id", [id]);
     if (result.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "USER_DELETED",
+      entityType: "user",
+      entityId: id,
+      before: beforeResult.rows[0],
+      after: null,
+    });
+
     res.json({ message: "User deleted successfully", id: result.rows[0].id });
   } catch (error) {
     console.error("Delete user error:", error);

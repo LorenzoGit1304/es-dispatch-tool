@@ -7,6 +7,7 @@ import {
   idParamSchema,
 } from "../schemas/requestSchemas";
 import { apiError } from "../utils/apiError";
+import { getActorUserId, logAuditEvent } from "../utils/auditLog";
 
 const router = Router();
 
@@ -15,6 +16,7 @@ const router = Router();
 ====================================================== */
 router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
   const { premise_id, requested_by, timeslot } = req.body;
+  const actorClerkId = (req as any).auth?.userId ?? null;
 
   const client = await pool.connect();
 
@@ -87,6 +89,20 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
 
     await client.query("COMMIT");
 
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "ENROLLMENT_CREATED",
+      entityType: "enrollment",
+      entityId: enrollment.id,
+      after: enrollment,
+      metadata: {
+        offerId: offer.id,
+        offeredToEsId: selectedES.id,
+        queuedForBusy,
+      },
+    });
+
     res.status(201).json({
       enrollment,
       offered_to: selectedES.name,
@@ -109,6 +125,7 @@ router.post("/", validate(enrollmentCreateSchema), async (req, res) => {
 ====================================================== */
 router.post("/:id/complete", async (req, res) => {
   const { id } = req.params;
+  const actorClerkId = (req as any).auth?.userId ?? null;
 
   const client = await pool.connect();
 
@@ -133,22 +150,38 @@ router.post("/:id/complete", async (req, res) => {
     }
 
     // 1️⃣ Mark enrollment as COMPLETED
-    await client.query(
+    const completedResult = await client.query(
       `UPDATE enrollments
        SET status = 'COMPLETED'
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING *`,
       [id]
     );
 
     // 2️⃣ Free the assigned ES
-    await client.query(
+    const freedEsResult = await client.query(
       `UPDATE users
        SET status = 'AVAILABLE'
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING status`,
       [enrollment.assigned_es_id]
     );
 
     await client.query("COMMIT");
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "ENROLLMENT_COMPLETED",
+      entityType: "enrollment",
+      entityId: id,
+      before: enrollment,
+      after: completedResult.rows[0],
+      metadata: {
+        releasedEsId: enrollment.assigned_es_id,
+        releasedEsStatus: freedEsResult.rows[0]?.status ?? "AVAILABLE",
+      },
+    });
 
     res.json({ message: "Enrollment completed successfully" });
 

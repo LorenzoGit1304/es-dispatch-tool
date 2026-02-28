@@ -3,6 +3,7 @@ import pool from "../config/db";
 import { apiError } from "../utils/apiError";
 import { validate } from "../middleware/validate";
 import { idParamSchema, paginationQuerySchema } from "../schemas/requestSchemas";
+import { getActorUserId, logAuditEvent } from "../utils/auditLog";
 
 const router = Router();
 
@@ -11,6 +12,7 @@ const router = Router();
 ====================================================== */
 router.post("/:id/accept", async (req, res) => {
   const { id } = req.params;
+  const actorClerkId = (req as any).auth?.userId ?? null;
   const client = await pool.connect();
 
   try {
@@ -34,6 +36,7 @@ router.post("/:id/accept", async (req, res) => {
     }
 
     const offer = acceptResult.rows[0];
+    const beforeOffer = { ...offer, status: "PENDING" };
 
     // 2️⃣ Update enrollment (assign ES)
     await client.query(
@@ -55,6 +58,20 @@ router.post("/:id/accept", async (req, res) => {
 
     await client.query("COMMIT");
 
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "OFFER_ACCEPTED",
+      entityType: "offer",
+      entityId: id,
+      before: beforeOffer,
+      after: offer,
+      metadata: {
+        enrollmentId: offer.enrollment_id,
+        esId: offer.es_id,
+      },
+    });
+
     res.json({ message: "Offer accepted successfully" });
 
   } catch (error) {
@@ -72,6 +89,7 @@ router.post("/:id/accept", async (req, res) => {
 ====================================================== */
 router.post("/:id/reject", async (req, res) => {
   const { id } = req.params;
+  const actorClerkId = (req as any).auth?.userId ?? null;
   const client = await pool.connect();
 
   try {
@@ -91,6 +109,7 @@ router.post("/:id/reject", async (req, res) => {
     }
 
     const offer = offerResult.rows[0];
+    const beforeOffer = { ...offer };
 
     if (offer.status !== "PENDING") {
       await client.query("ROLLBACK");
@@ -142,6 +161,22 @@ router.post("/:id/reject", async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "OFFER_REJECTED_REASSIGNED",
+      entityType: "offer",
+      entityId: id,
+      before: beforeOffer,
+      after: { ...offer, status: "REJECTED" },
+      metadata: {
+        enrollmentId: offer.enrollment_id,
+        rejectedByEsId: offer.es_id,
+        reassignedOfferId: newOfferResult.rows[0]?.id ?? null,
+        reassignedToEsId: nextES.id,
+      },
+    });
 
     res.json({
       message: "Offer rejected. Reassigned to next ES.",

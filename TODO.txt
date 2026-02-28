@@ -4,6 +4,6 @@
 - [x] Phase 2.3 Standardize error format and add shared API error helper.
 - [x] Phase 3 Set up `node-pg-migrate` and convert SQL files to migration scripts.
 - [x] Phase 4 Add missing detail endpoints and pagination for list routes.
-- [ ] Phase 5 Add audit log table + write tracking on all mutations.
+- [x] Phase 5 Add audit log table + write tracking on all mutations.
 - [ ] Phase 7 Add automated tests (dispatch fairness, race conditions, auth/role).
 - [ ] Phase 8 Railway deployment pipeline + health monitoring.
