@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --exec ts-node src/index.ts",
@@ -13,7 +16,9 @@
     "migrate:down": "node-pg-migrate down --config-file node-pg-migrate.config.js",
     "migrate:create": "node-pg-migrate create --config-file node-pg-migrate.config.js",
     "lint": "eslint . --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "migrate:status": "node scripts/checkMigrationStatus.js",
+    "smoke:auth": "bash scripts/smokeAuthPaths.sh"
   },
   "keywords": [],
   "author": "",

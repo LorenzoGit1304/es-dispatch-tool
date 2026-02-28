@@ -8,16 +8,20 @@ export type ClerkPaginatedList = {
   };
 };
 
+export type UserRole = "ADMIN" | "ES" | "AS";
+
 export type DashboardData = {
-  users: ClerkPaginatedList;
-  enrollments: ClerkPaginatedList;
-  offers: ClerkPaginatedList;
+  role: UserRole;
+  users: ClerkPaginatedList | null;
+  enrollments: ClerkPaginatedList | null;
+  offers: ClerkPaginatedList | null;
+  auditLog: ClerkPaginatedList | null;
 };
 
 export type UserSyncResponse = {
   id: number;
   name: string;
-  role: string;
+  role: UserRole;
   status: string;
   clerk_id: string;
   email: string;

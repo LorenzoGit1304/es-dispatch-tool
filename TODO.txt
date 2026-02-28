@@ -10,5 +10,12 @@
 - [ ] Phase 6.3 ES views: language selection, status controls, active assignments/offers.
 - [ ] Phase 6.4 AS views: create transfer request (premise_id + timeslot) and tracking history.
 - [x] Phase 6.5 Backend support for frontend role UX (ownership-scoped endpoints + stricter role guards).
+- [x] Sanity 1: fix frontend endpoint contract mismatch by making dashboard requests role-aware.
+- [x] Sanity 2: include admin audit-log loading in dashboard data path.
+- [x] Sanity 3: pin Node runtime requirement (`.nvmrc`, package `engines`) for frontend/backend consistency.
+- [x] Sanity 4: add backend `.env.example` for predictable environment setup.
+- [x] Sanity 5: add migration status check command (`npm run migrate:status`).
+- [x] Sanity 6: add auth/role smoke check command (`npm run smoke:auth`) for 401/403/200 validation.
+- [x] Sanity 7: cleanup commit hygiene (`.gitignore` hardening for deps/build/backups).
 - [ ] Phase 7 Add automated tests (dispatch fairness, race conditions, auth/role + core frontend flows).
 - [ ] Phase 8 Railway deployment pipeline + health monitoring + runbook checks.

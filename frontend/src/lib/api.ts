@@ -1,4 +1,9 @@
-import type { ClerkPaginatedList, DashboardData, UserSyncResponse } from "../types/api";
+import type {
+  ClerkPaginatedList,
+  DashboardData,
+  UserRole,
+  UserSyncResponse,
+} from "../types/api";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:4000";
 
@@ -42,6 +47,12 @@ export const api = {
     request<ClerkPaginatedList>("/enrollments?page=1&limit=5", getToken),
   getOffers: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/offers?page=1&limit=5", getToken),
+  getMyEnrollments: (getToken: TokenResolver) =>
+    request<ClerkPaginatedList>("/enrollments/my/requests?page=1&limit=5", getToken),
+  getMyOffers: (getToken: TokenResolver) =>
+    request<ClerkPaginatedList>("/offers/my?page=1&limit=5", getToken),
+  getAuditLog: (getToken: TokenResolver) =>
+    request<ClerkPaginatedList>("/audit-log?page=1&limit=5", getToken),
   syncUser: (
     getToken: TokenResolver,
     payload: { clerk_id: string; email: string; name: string }
@@ -50,13 +61,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  getDashboardData: async (getToken: TokenResolver): Promise<DashboardData> => {
-    const [users, enrollments, offers] = await Promise.all([
-      api.getUsers(getToken),
-      api.getEnrollments(getToken),
-      api.getOffers(getToken),
-    ]);
+  getDashboardData: async (getToken: TokenResolver, role: UserRole): Promise<DashboardData> => {
+    if (role === "ADMIN") {
+      const [users, enrollments, offers, auditLog] = await Promise.all([
+        api.getUsers(getToken),
+        api.getEnrollments(getToken),
+        api.getOffers(getToken),
+        api.getAuditLog(getToken),
+      ]);
+      return { role, users, enrollments, offers, auditLog };
+    }
 
-    return { users, enrollments, offers };
+    if (role === "ES") {
+      const offers = await api.getMyOffers(getToken);
+      return { role, users: null, enrollments: null, offers, auditLog: null };
+    }
+
+    const enrollments = await api.getMyEnrollments(getToken);
+    return { role, users: null, enrollments, offers: null, auditLog: null };
   },
 };

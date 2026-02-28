@@ -8,7 +8,7 @@ Dispatch workflow for handling enrollment transfer requests and routing them to 
 
 ## Current stage
 
-Project status is updated to **completed through Phase 5**, with **Phase 6 (frontend)** in progress.
+Project status is updated to **completed through Phase 6.5 backend alignment**, with **Phase 6 frontend views** in progress.
 
 Completed so far:
 - Core dispatch, fallback assignment, offer lifecycle, timeout job, user CRUD.
@@ -19,10 +19,11 @@ Completed so far:
 - Validation + standardized API error contracts implemented.
 - Missing detail endpoints, pagination, and enrollment status filtering implemented.
 - Audit log migration and write-tracking integrated into mutating routes.
-- Frontend scaffold created (React + Vite + Clerk + protected routing + initial dashboard + `/users/sync` bootstrap).
+- Frontend scaffold created (React + Vite + Clerk + protected routing + `/users/sync` bootstrap).
+- Frontend dashboard API calls are now role-aware (`ADMIN` vs `ES` vs `AS`) to avoid false `403` errors.
 
 Active focus now:
-- **Phase 6: role-based frontend implementation**.
+- **Phase 6: role-based frontend screens and actions**.
 
 
 ## Backend setup
@@ -30,7 +31,7 @@ Active focus now:
 1. Create database and apply SQL files in order:
    - Prefer migration tooling:
    - `cd backend && npm run migrate:up`
-2. Add `backend/.env`:
+2. Add `backend/.env` (copy from `backend/.env.example`):
 
 ```env
 DB_USER=dispatch_user
@@ -44,7 +45,13 @@ CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 FRONTEND_URL=http://localhost:5173
 ```
 
-3. Start backend:
+3. Use Node 20.19+ (required by frontend Vite 7):
+
+```bash
+nvm use
+```
+
+4. Start backend:
 
 ```bash
 cd backend
@@ -69,6 +76,43 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_key_here
 VITE_API_BASE_URL=http://localhost:4000
 ```
 
+## Role-based API contract (current)
+
+- `ADMIN` dashboard calls:
+  - `GET /users`
+  - `GET /enrollments`
+  - `GET /offers`
+  - `GET /audit-log`
+- `ES` dashboard calls:
+  - `GET /offers/my`
+- `AS` dashboard calls:
+  - `GET /enrollments/my/requests`
+- Shared:
+  - `POST /users/sync`
+  - `GET /users/me`
+
+## Verification commands
+
+From `backend/`:
+
+```bash
+npm run migrate:status
+```
+
+Expected success output includes: `Status: OK - no pending migrations.`
+
+Auth/role smoke checks:
+
+```bash
+BASE_URL=http://localhost:4000 \
+ADMIN_TOKEN=... \
+ES_TOKEN=... \
+AS_TOKEN=... \
+npm run smoke:auth
+```
+
+Expected: `[PASS]` lines for 401/403/200 checks and `Smoke checks complete.`
+
 ## Frontend role plan (Phase 6)
 
 1. `ADMIN` panel:
@@ -86,7 +130,6 @@ VITE_API_BASE_URL=http://localhost:4000
 
 ## Next milestones
 
-1. Phase 6: implement role-based frontend pages (`ADMIN`, `ES`, `AS`) and navigation.
-2. Phase 6: add backend ownership/role guard enhancements required by UI flows.
-3. Phase 7: add automated tests (auth/role, dispatch flows, race conditions).
-4. Phase 8: production deployment hardening (Railway pipeline, monitoring, runbooks).
+1. Phase 6.1-6.4: implement role-specific frontend pages/actions (`ADMIN`, `ES`, `AS`).
+2. Phase 7: add automated tests (auth/role, dispatch flows, race conditions).
+3. Phase 8: production deployment hardening (Railway pipeline, monitoring, runbooks).

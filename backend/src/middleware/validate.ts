@@ -32,7 +32,14 @@ export const validate = (schema: ZodTypeAny, target: ValidateTarget = "body") =>
       );
     }
 
-    (req as Request)[target] = parsed.data;
+    if (target === "query") {
+      Object.assign(req.query, parsed.data);
+    } else if (target === "params") {
+      Object.assign(req.params, parsed.data);
+    } else {
+      req.body = parsed.data;
+    }
+
     return next();
   };
 };

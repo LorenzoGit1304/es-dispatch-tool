@@ -20,13 +20,13 @@ export function DashboardPage() {
   });
 
   useEffect(() => {
-    if (syncState.loading || syncState.error) {
+    if (syncState.loading || syncState.error || !syncState.user) {
       return;
     }
 
     let isCancelled = false;
 
-    api.getDashboardData(getToken)
+    api.getDashboardData(getToken, syncState.user.role)
       .then((data) => {
         if (!isCancelled) {
           setState({ loading: false, error: null, data });
@@ -45,7 +45,7 @@ export function DashboardPage() {
     return () => {
       isCancelled = true;
     };
-  }, [getToken, syncState.error, syncState.loading]);
+  }, [getToken, syncState.error, syncState.loading, syncState.user]);
 
   if (syncState.loading) {
     return <p className="status-message">Syncing your user profile...</p>;
@@ -79,35 +79,65 @@ export function DashboardPage() {
       </header>
 
       <section className="grid">
-        <article className="card">
-          <h2>Users</h2>
-          <p className="metric">{state.data.users.pagination.total}</p>
-          <p className="subtle">Showing {state.data.users.data.length} records</p>
-        </article>
-        <article className="card">
-          <h2>Enrollments</h2>
-          <p className="metric">{state.data.enrollments.pagination.total}</p>
-          <p className="subtle">Showing {state.data.enrollments.data.length} records</p>
-        </article>
-        <article className="card">
-          <h2>Offers</h2>
-          <p className="metric">{state.data.offers.pagination.total}</p>
-          <p className="subtle">Showing {state.data.offers.data.length} records</p>
-        </article>
+        {state.data.users && (
+          <article className="card">
+            <h2>Users</h2>
+            <p className="metric">{state.data.users.pagination.total}</p>
+            <p className="subtle">Showing {state.data.users.data.length} records</p>
+          </article>
+        )}
+        {state.data.enrollments && (
+          <article className="card">
+            <h2>{state.data.role === "AS" ? "My Requests" : "Enrollments"}</h2>
+            <p className="metric">{state.data.enrollments.pagination.total}</p>
+            <p className="subtle">Showing {state.data.enrollments.data.length} records</p>
+          </article>
+        )}
+        {state.data.offers && (
+          <article className="card">
+            <h2>{state.data.role === "ES" ? "My Offers" : "Offers"}</h2>
+            <p className="metric">{state.data.offers.pagination.total}</p>
+            <p className="subtle">Showing {state.data.offers.data.length} records</p>
+          </article>
+        )}
+        {state.data.auditLog && (
+          <article className="card">
+            <h2>Audit Events</h2>
+            <p className="metric">{state.data.auditLog.pagination.total}</p>
+            <p className="subtle">Showing {state.data.auditLog.data.length} records</p>
+          </article>
+        )}
       </section>
 
-      <section className="card">
-        <h2>Recent Enrollments</h2>
-        <ul className="record-list">
-          {state.data.enrollments.data.map((row) => (
-            <li key={String(row.id)}>
-              <span>#{String(row.id)}</span>
-              <span>{String(row.premise_id ?? "-")}</span>
-              <span>{String(row.status ?? "-")}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      {state.data.enrollments && (
+        <section className="card">
+          <h2>{state.data.role === "AS" ? "My Enrollment Requests" : "Recent Enrollments"}</h2>
+          <ul className="record-list">
+            {state.data.enrollments.data.map((row) => (
+              <li key={String(row.id)}>
+                <span>#{String(row.id)}</span>
+                <span>{String(row.premise_id ?? "-")}</span>
+                <span>{String(row.status ?? "-")}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {state.data.offers && (
+        <section className="card">
+          <h2>{state.data.role === "ES" ? "My Offer Queue" : "Recent Offers"}</h2>
+          <ul className="record-list">
+            {state.data.offers.data.map((row) => (
+              <li key={String(row.id)}>
+                <span>#{String(row.id)}</span>
+                <span>Enrollment {String(row.enrollment_id ?? "-")}</span>
+                <span>{String(row.status ?? "-")}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

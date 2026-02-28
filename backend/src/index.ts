@@ -29,14 +29,17 @@ const allowedOrigins = (process.env.FRONTEND_URL ?? "http://localhost:5173")
   .map(origin => origin.trim())
   .filter(Boolean);
 
-// Must be first, before any routes
-app.use(clerkMiddleware());
-
-app.use(cors({
+const corsOptions = {
   origin: allowedOrigins,
   credentials: true,
-}));
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json());
+
+// Must run before protected routes so req.auth is available
+app.use(clerkMiddleware());
 
 // Public route — no auth required
 app.use("/health", healthRoutes);
