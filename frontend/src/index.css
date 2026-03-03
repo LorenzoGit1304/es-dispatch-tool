@@ -111,6 +111,33 @@ body {
   cursor: pointer;
 }
 
+.btn-primary {
+  border: 1px solid #9a4a2f;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+.btn-danger {
+  border: 1px solid #7d1f1f;
+  border-radius: 8px;
+  background: #9f2b2b;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+.btn-primary:disabled,
+.btn-danger:disabled,
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .record-list {
   list-style: none;
   margin: 0;
@@ -119,10 +146,11 @@ body {
 
 .record-list li {
   display: grid;
-  grid-template-columns: 80px 1fr auto;
+  grid-template-columns: 80px 1fr auto auto;
   gap: 0.75rem;
   padding: 0.65rem 0;
   border-bottom: 1px solid var(--line);
+  align-items: center;
 }
 
 .record-list li:last-child {
@@ -212,6 +240,30 @@ body {
   font-size: 0.82rem;
 }
 
+.offer-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.control-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.control-field span {
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.control-field select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.9rem;
+}
+
 .status-message {
   min-height: 100vh;
   margin: 0;
@@ -237,5 +289,13 @@ body {
 
   .btn-secondary {
     width: 100%;
+  }
+
+  .record-list li {
+    grid-template-columns: 70px 1fr;
+  }
+
+  .offer-actions {
+    grid-column: 1 / -1;
   }
 }

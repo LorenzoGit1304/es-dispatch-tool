@@ -1,7 +1,15 @@
 import { SignOutButton, useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { AuditLogRow, DashboardData, UserRole, UserRow, UserStatus } from "../types/api";
+import type {
+  AuditLogRow,
+  DashboardData,
+  OfferRow,
+  UserLanguage,
+  UserRole,
+  UserRow,
+  UserStatus,
+} from "../types/api";
 import { useSyncCurrentUser } from "../hooks/useSyncCurrentUser";
 
 type LoadState = {
@@ -12,6 +20,7 @@ type LoadState = {
 
 const USER_ROLES: UserRole[] = ["ADMIN", "ES", "AS"];
 const USER_STATUSES: UserStatus[] = ["AVAILABLE", "BUSY", "UNAVAILABLE"];
+const USER_LANGUAGES: UserLanguage[] = ["English", "Spanish", "Both"];
 
 export function DashboardPage() {
   const { getToken } = useAuth();
@@ -23,6 +32,7 @@ export function DashboardPage() {
   });
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeUserAction, setActiveUserAction] = useState<number | null>(null);
+  const [activeOfferAction, setActiveOfferAction] = useState<number | null>(null);
 
   const loadDashboard = useCallback(async (role: UserRole) => {
     setState((previous) => ({
@@ -83,6 +93,58 @@ export function DashboardPage() {
     }
   };
 
+  const onMyStatusChange = async (status: UserStatus) => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActiveUserAction(syncState.user.id);
+    try {
+      await api.updateMyStatus(getToken, status);
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to update your status");
+    } finally {
+      setActiveUserAction(null);
+    }
+  };
+
+  const onMyLanguageChange = async (language: UserLanguage) => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActiveUserAction(syncState.user.id);
+    try {
+      await api.updateMyLanguage(getToken, language);
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to update your language");
+    } finally {
+      setActiveUserAction(null);
+    }
+  };
+
+  const onOfferAction = async (offerId: number, action: "accept" | "reject") => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActiveOfferAction(offerId);
+    try {
+      if (action === "accept") {
+        await api.acceptOffer(getToken, offerId);
+      } else {
+        await api.rejectOffer(getToken, offerId);
+      }
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to process offer");
+    } finally {
+      setActiveOfferAction(null);
+    }
+  };
+
   if (syncState.loading) {
     return <p className="status-message">Syncing your user profile...</p>;
   }
@@ -100,7 +162,10 @@ export function DashboardPage() {
   }
 
   const users = (state.data.users?.data ?? []) as UserRow[];
+  const role = state.data.role;
+  const currentEsProfile = role === "ES" ? users[0] ?? null : null;
   const auditLog = (state.data.auditLog?.data ?? []) as AuditLogRow[];
+  const offers = (state.data.offers?.data ?? []) as OfferRow[];
   const statusCounts = users.reduce<Record<UserStatus, number>>(
     (counts, row) => {
       counts[row.status] += 1;
@@ -134,14 +199,14 @@ export function DashboardPage() {
         )}
         {state.data.enrollments && (
           <article className="card">
-            <h2>{state.data.role === "AS" ? "My Requests" : "Enrollments"}</h2>
+            <h2>{role === "AS" ? "My Requests" : "Enrollments"}</h2>
             <p className="metric">{state.data.enrollments.pagination.total}</p>
             <p className="subtle">Showing {state.data.enrollments.data.length} records</p>
           </article>
         )}
         {state.data.offers && (
           <article className="card">
-            <h2>{state.data.role === "ES" ? "My Offers" : "Offers"}</h2>
+            <h2>{role === "ES" ? "My Offers" : "Offers"}</h2>
             <p className="metric">{state.data.offers.pagination.total}</p>
             <p className="subtle">Showing {state.data.offers.data.length} records</p>
           </article>
@@ -155,7 +220,7 @@ export function DashboardPage() {
         )}
       </section>
 
-      {state.data.role === "ADMIN" && (
+      {role === "ADMIN" && (
         <>
           <section className="card">
             <h2>Maintenance Overview</h2>
@@ -265,9 +330,9 @@ export function DashboardPage() {
         </>
       )}
 
-      {state.data.role !== "ADMIN" && state.data.enrollments && (
+      {role !== "ADMIN" && state.data.enrollments && (
         <section className="card">
-          <h2>{state.data.role === "AS" ? "My Enrollment Requests" : "Recent Enrollments"}</h2>
+          <h2>{role === "AS" ? "My Enrollment Requests" : "Recent Enrollments"}</h2>
           <ul className="record-list">
             {state.data.enrollments.data.map((row) => (
               <li key={String(row.id)}>
@@ -280,18 +345,72 @@ export function DashboardPage() {
         </section>
       )}
 
-      {state.data.role !== "ADMIN" && state.data.offers && (
+      {role !== "ADMIN" && state.data.offers && (
         <section className="card">
-          <h2>{state.data.role === "ES" ? "My Offer Queue" : "Recent Offers"}</h2>
+          <h2>{role === "ES" ? "My Offer Queue" : "Recent Offers"}</h2>
           <ul className="record-list">
-            {state.data.offers.data.map((row) => (
+            {offers.map((row) => (
               <li key={String(row.id)}>
                 <span>#{String(row.id)}</span>
                 <span>Enrollment {String(row.enrollment_id ?? "-")}</span>
                 <span>{String(row.status ?? "-")}</span>
+                {role === "ES" && row.status === "PENDING" && (
+                  <span className="offer-actions">
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => onOfferAction(row.id, "accept")}
+                      disabled={activeOfferAction === row.id}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={() => onOfferAction(row.id, "reject")}
+                      disabled={activeOfferAction === row.id}
+                    >
+                      Reject
+                    </button>
+                  </span>
+                )}
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {role === "ES" && currentEsProfile && (
+        <section className="card">
+          <h2>My ES Controls</h2>
+          <p className="subtle">Set your language coverage and availability before receiving requests.</p>
+          {actionError && <p className="inline-error">{actionError}</p>}
+          <div className="maintenance-grid">
+            <label className="control-field">
+              <span>Status</span>
+              <select
+                value={currentEsProfile.status}
+                onChange={(event) => onMyStatusChange(event.target.value as UserStatus)}
+                disabled={activeUserAction === syncState.user?.id}
+              >
+                {USER_STATUSES.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </label>
+            <label className="control-field">
+              <span>Language</span>
+              <select
+                value={currentEsProfile.language ?? "English"}
+                onChange={(event) => onMyLanguageChange(event.target.value as UserLanguage)}
+                disabled={activeUserAction === syncState.user?.id}
+              >
+                {USER_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>{language}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </section>
       )}
     </main>

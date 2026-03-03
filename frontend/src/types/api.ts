@@ -10,6 +10,7 @@ export type ClerkPaginatedList = {
 
 export type UserRole = "ADMIN" | "ES" | "AS";
 export type UserStatus = "AVAILABLE" | "BUSY" | "UNAVAILABLE";
+export type UserLanguage = "English" | "Spanish" | "Both";
 
 export type UserRow = {
   id: number;
@@ -17,6 +18,19 @@ export type UserRow = {
   role: UserRole;
   status: UserStatus;
   last_assigned_at: string | null;
+  language?: UserLanguage | null;
+};
+
+export type OfferStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+
+export type OfferRow = {
+  id: number;
+  enrollment_id: number;
+  es_id: number;
+  status: OfferStatus;
+  offered_at: string;
+  expires_at: string;
+  responded_at: string | null;
 };
 
 export type AuditLogRow = {
