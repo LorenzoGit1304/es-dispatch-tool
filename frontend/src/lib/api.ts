@@ -15,6 +15,18 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?
 
 type TokenResolver = () => Promise<string | null>;
 
+export class ApiRequestError extends Error {
+  status: number;
+  code: string | null;
+
+  constructor(message: string, status: number, code: string | null = null) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function request<T>(
   path: string,
   tokenResolver: TokenResolver,
@@ -40,7 +52,8 @@ async function request<T>(
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     const message = typeof errorBody.error === "string" ? errorBody.error : "Request failed";
-    throw new Error(message);
+    const code = typeof errorBody.code === "string" ? errorBody.code : null;
+    throw new ApiRequestError(message, response.status, code);
   }
 
   return response.json() as Promise<T>;
@@ -50,7 +63,7 @@ export const api = {
   getUsers: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/users?page=1&limit=20", getToken),
   getEnrollments: (getToken: TokenResolver) =>
-    request<ClerkPaginatedList>("/enrollments?page=1&limit=5", getToken),
+    request<ClerkPaginatedList>("/enrollments?page=1&limit=50", getToken),
   getOffers: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/offers?page=1&limit=5", getToken),
   getMyEnrollments: (getToken: TokenResolver) =>
@@ -111,6 +124,11 @@ export const api = {
   startEnrollmentWork: (getToken: TokenResolver, enrollmentId: number) =>
     request<{ message: string }>(`/enrollments/${enrollmentId}/start`, getToken, {
       method: "POST",
+    }),
+  reofferEnrollment: (getToken: TokenResolver, enrollmentId: number, esId: number) =>
+    request<{ message: string; offered_to: string }>(`/enrollments/${enrollmentId}/reoffer`, getToken, {
+      method: "POST",
+      body: JSON.stringify({ es_id: esId }),
     }),
   syncUser: (
     getToken: TokenResolver,

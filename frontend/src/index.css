@@ -59,6 +59,25 @@ body {
   align-items: center;
 }
 
+.sound-control {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 170px;
+}
+
+.sound-control span {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sound-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
 .top-bar h1 {
   margin: 0.15rem 0;
   font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
@@ -98,6 +117,19 @@ body {
 .card h2 {
   margin-top: 0;
   font-size: 1rem;
+}
+
+.session-banner {
+  margin: 0 0 1rem;
+  border: 1px solid #e5b96d;
+  background: #fff4e0;
+  color: #7d4f11;
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
 }
 
 .metric {
@@ -292,6 +324,13 @@ body {
   align-items: end;
 }
 
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
 .prompt-note {
   color: #204a72;
   font-weight: 600;
@@ -340,6 +379,42 @@ body {
   color: #1f7456;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 15, 10, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(480px, 100%);
+  background: #fffaf1;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(20, 15, 10, 0.25);
+  padding: 1rem;
+}
+
+.modal-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.modal-card p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.95rem;
+}
+
 .status-message {
   min-height: 100vh;
   margin: 0;
@@ -369,6 +444,10 @@ body {
     gap: 0.5rem;
   }
 
+  .sound-control {
+    width: 100%;
+  }
+
   .btn-secondary {
     width: 100%;
   }
@@ -379,5 +458,10 @@ body {
 
   .offer-actions {
     grid-column: 1 / -1;
+  }
+
+  .session-banner {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

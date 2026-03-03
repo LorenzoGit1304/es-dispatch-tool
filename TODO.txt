@@ -19,3 +19,21 @@
 - [x] Sanity 7: cleanup commit hygiene (`.gitignore` hardening for deps/build/backups).
 - [ ] Phase 7 Add automated tests (dispatch fairness, race conditions, auth/role + core frontend flows).
 - [ ] Phase 8 Railway deployment pipeline + health monitoring + runbook checks.
+
+## Post-Commit QA Checklist (after `271ec3f`)
+
+- [x] Apply latest migrations and confirm `009_add_current_enrollment_pointer` is present.
+- [x] Admin `Enrollment Queue Control`: verify search/filter/aging badges behave correctly.
+- [x] Admin manual re-offer: only `WAITING` enrollments can be re-offered; action logs in audit.
+- [x] AS `Assigned / Offered ES`: verify name/id appears before and after acceptance.
+- [x] AS `ES Work Status` badges: verify active/queued/waiting/blocked/completed states display correctly.
+- [x] ES `Set Current`: verify AS sees whether ES is working this enrollment or another one.
+- [x] All-ES-rejected scenario: AS sees "schedule another day" guidance and blocked status.
+- [x] Completion ownership: AS cannot complete; ES can complete own assigned; admin override still works.
+- [x] Conflict prevention UX: modal confirms before reject/complete/role change; cancel performs no action.
+- [x] Session awareness: invalid/expired session shows warning banner.
+- [ ] Sound settings: `Sound: On/Off` persists after reload and toggles notifications.
+- [x] ES new-offer alert: plays ~5 seconds on newly received pending request.
+- [ ] AS transition sounds: accepted/reassigned/all-rejected/completed each trigger expected sound.
+- [ ] Polling refresh: AS/ES dashboards update in ~10s without manual refresh.
+- [ ] Regression checks: backend `npm run typecheck`, frontend `npm run build`, backend `npm run smoke:auth` pass.

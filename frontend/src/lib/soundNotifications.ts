@@ -6,6 +6,11 @@ type NotificationSound =
   | "as_completed";
 
 let audioContext: AudioContext | null = null;
+let notificationVolume = 0.65;
+
+export const setNotificationVolume = (value: number) => {
+  notificationVolume = Math.max(0, Math.min(1, value));
+};
 
 const getAudioContext = (): AudioContext | null => {
   if (typeof window === "undefined") {
@@ -63,7 +68,7 @@ const playRepeatingPattern = (
   for (let i = 0; i < steps; i += 1) {
     const frequency = frequencies[i % frequencies.length];
     const startTime = now + (i * stepMs) / 1000;
-    scheduleTone(context, startTime, frequency, noteDurationMs, volume);
+    scheduleTone(context, startTime, frequency, noteDurationMs, volume * notificationVolume);
   }
 };
 

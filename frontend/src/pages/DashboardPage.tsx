@@ -1,7 +1,7 @@
 import { SignOutButton, useAuth } from "@clerk/clerk-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
-import { playNotificationSound } from "../lib/soundNotifications";
+import { ApiRequestError, api } from "../lib/api";
+import { playNotificationSound, setNotificationVolume } from "../lib/soundNotifications";
 import type {
   AuditLogRow,
   DashboardData,
@@ -19,6 +19,12 @@ type LoadState = {
   error: string | null;
   data: DashboardData | null;
 };
+
+type ConfirmState = {
+  title: string;
+  message: string;
+  onConfirm: () => Promise<void>;
+} | null;
 
 const USER_ROLES: UserRole[] = ["ADMIN", "ES", "AS"];
 const USER_STATUSES: UserStatus[] = ["AVAILABLE", "BUSY", "UNAVAILABLE"];
@@ -123,7 +129,7 @@ const getEsDisplay = (row: EnrollmentRow): string => {
 };
 
 export function DashboardPage() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const syncState = useSyncCurrentUser();
   const [state, setState] = useState<LoadState>({
     loading: true,
@@ -136,19 +142,42 @@ export function DashboardPage() {
   const [activeOfferAction, setActiveOfferAction] = useState<number | null>(null);
   const [activeEnrollmentAction, setActiveEnrollmentAction] = useState<number | null>(null);
   const [activeStartAction, setActiveStartAction] = useState<number | null>(null);
+  const [activeReofferAction, setActiveReofferAction] = useState<number | null>(null);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+  const [soundVolume, setSoundVolume] = useState<number>(() => {
     if (typeof window === "undefined") {
-      return true;
+      return 65;
     }
-    return window.localStorage.getItem("dispatch_sound_enabled") !== "false";
+    const stored = Number(window.localStorage.getItem("dispatch_sound_volume"));
+    return Number.isFinite(stored) ? Math.max(0, Math.min(100, stored)) : 65;
   });
   const [requestForm, setRequestForm] = useState({
     premiseId: "",
     timeslot: "",
   });
+  const [sessionWarning, setSessionWarning] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  const [isConfirmingAction, setIsConfirmingAction] = useState(false);
   const previousAsEnrollmentsRef = useRef<EnrollmentRow[] | null>(null);
   const previousEsOffersRef = useRef<OfferRow[] | null>(null);
+  const [adminEnrollmentSearch, setAdminEnrollmentSearch] = useState("");
+  const [adminEnrollmentStatusFilter, setAdminEnrollmentStatusFilter] = useState<
+    "ALL" | "WAITING" | "ASSIGNED" | "COMPLETED"
+  >("ALL");
+  const [reofferTargetByEnrollment, setReofferTargetByEnrollment] = useState<Record<number, string>>({});
+
+  const handleActionError = (error: unknown, fallbackMessage: string) => {
+    const message = error instanceof Error ? error.message : fallbackMessage;
+    setActionError(message);
+
+    if (error instanceof ApiRequestError && (error.status === 401 || error.code === "UNAUTHORIZED")) {
+      setSessionWarning("Your session expired or became invalid. Please sign in again.");
+    }
+  };
+
+  const openConfirm = (title: string, message: string, onConfirm: () => Promise<void>) => {
+    setConfirmState({ title, message, onConfirm });
+  };
 
   const loadDashboard = useCallback(async (role: UserRole, options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
@@ -169,6 +198,9 @@ export function DashboardPage() {
       const data = await api.getDashboardData(getToken, role);
       setState({ loading: false, error: null, data });
     } catch (error: unknown) {
+      if (error instanceof ApiRequestError && (error.status === 401 || error.code === "UNAUTHORIZED")) {
+        setSessionWarning("Your session expired or became invalid. Please sign in again.");
+      }
       setState({
         loading: false,
         error: error instanceof Error ? error.message : "Failed to load dashboard data",
@@ -184,6 +216,15 @@ export function DashboardPage() {
 
     loadDashboard(syncState.user.role);
   }, [loadDashboard, syncState.error, syncState.loading, syncState.user]);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+    if (!isSignedIn) {
+      setSessionWarning("Session invalidated in the background. Please sign in again.");
+    }
+  }, [isLoaded, isSignedIn]);
 
   useEffect(() => {
     if (syncState.loading || syncState.error || !syncState.user) {
@@ -207,11 +248,12 @@ export function DashboardPage() {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem("dispatch_sound_enabled", soundEnabled ? "true" : "false");
-  }, [soundEnabled]);
+    window.localStorage.setItem("dispatch_sound_volume", String(soundVolume));
+    setNotificationVolume(soundVolume / 100);
+  }, [soundVolume]);
 
   useEffect(() => {
-    if (!soundEnabled || !state.data || state.data.role !== "ES") {
+    if (soundVolume <= 0 || !state.data || state.data.role !== "ES") {
       return;
     }
 
@@ -236,10 +278,10 @@ export function DashboardPage() {
 
     playNotificationSound("es_new_offer").catch(() => {});
     setActionSuccess("New enrollment request received. Please review your offer queue.");
-  }, [soundEnabled, state.data]);
+  }, [soundVolume, state.data]);
 
   useEffect(() => {
-    if (!soundEnabled || !state.data || state.data.role !== "AS") {
+    if (soundVolume <= 0 || !state.data || state.data.role !== "AS") {
       return;
     }
 
@@ -291,7 +333,7 @@ export function DashboardPage() {
         return;
       }
     }
-  }, [soundEnabled, state.data]);
+  }, [soundVolume, state.data]);
 
   const onUserStatusChange = async (userId: number, status: UserStatus) => {
     if (!syncState.user) {
@@ -304,7 +346,7 @@ export function DashboardPage() {
       await api.updateUserStatus(getToken, userId, status);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to update user status");
+      handleActionError(error, "Failed to update user status");
     } finally {
       setActiveUserAction(null);
     }
@@ -321,10 +363,18 @@ export function DashboardPage() {
       await api.updateUserRole(getToken, userId, role);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to update user role");
+      handleActionError(error, "Failed to update user role");
     } finally {
       setActiveUserAction(null);
     }
+  };
+
+  const requestUserRoleChange = (userId: number, role: UserRole) => {
+    openConfirm(
+      "Confirm Role Change",
+      `Are you sure you want to change this user's role to ${role}?`,
+      () => onUserRoleChange(userId, role)
+    );
   };
 
   const onMyStatusChange = async (status: UserStatus) => {
@@ -338,7 +388,7 @@ export function DashboardPage() {
       await api.updateMyStatus(getToken, status);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to update your status");
+      handleActionError(error, "Failed to update your status");
     } finally {
       setActiveUserAction(null);
     }
@@ -355,7 +405,7 @@ export function DashboardPage() {
       await api.updateMyLanguage(getToken, language);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to update your language");
+      handleActionError(error, "Failed to update your language");
     } finally {
       setActiveUserAction(null);
     }
@@ -378,10 +428,18 @@ export function DashboardPage() {
       }
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to process offer");
+      handleActionError(error, "Failed to process offer");
     } finally {
       setActiveOfferAction(null);
     }
+  };
+
+  const requestOfferReject = (offerId: number) => {
+    openConfirm(
+      "Confirm Offer Rejection",
+      "Reject this offer and reassign the enrollment to another ES?",
+      () => onOfferAction(offerId, "reject")
+    );
   };
 
   const onCreateTransferRequest = async () => {
@@ -408,7 +466,7 @@ export function DashboardPage() {
       setActionSuccess("Transfer request created.");
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to create transfer request");
+      handleActionError(error, "Failed to create transfer request");
     } finally {
       setIsSubmittingRequest(false);
     }
@@ -426,10 +484,18 @@ export function DashboardPage() {
       setActionSuccess("Enrollment marked as completed.");
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to complete enrollment");
+      handleActionError(error, "Failed to complete enrollment");
     } finally {
       setActiveEnrollmentAction(null);
     }
+  };
+
+  const requestCompleteEnrollment = (enrollmentId: number) => {
+    openConfirm(
+      "Confirm Completion",
+      `Mark enrollment #${enrollmentId} as completed?`,
+      () => onCompleteEnrollment(enrollmentId)
+    );
   };
 
   const onStartEnrollmentWork = async (enrollmentId: number) => {
@@ -444,9 +510,39 @@ export function DashboardPage() {
       setActionSuccess(`You are now marked as working enrollment #${enrollmentId}.`);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
-      setActionError(error instanceof Error ? error.message : "Failed to mark current enrollment");
+      handleActionError(error, "Failed to mark current enrollment");
     } finally {
       setActiveStartAction(null);
+    }
+  };
+
+  const onAdminReofferEnrollment = async (enrollmentId: number) => {
+    if (!syncState.user) {
+      return;
+    }
+    const target = reofferTargetByEnrollment[enrollmentId];
+    if (!target) {
+      setActionError("Select an ES before re-offering.");
+      return;
+    }
+
+    const targetEsId = Number(target);
+    if (Number.isNaN(targetEsId)) {
+      setActionError("Invalid ES selection.");
+      return;
+    }
+
+    setActionError(null);
+    setActionSuccess(null);
+    setActiveReofferAction(enrollmentId);
+    try {
+      const result = await api.reofferEnrollment(getToken, enrollmentId, targetEsId);
+      setActionSuccess(`Enrollment #${enrollmentId} re-offered to ${result.offered_to}.`);
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      handleActionError(error, "Failed to re-offer enrollment");
+    } finally {
+      setActiveReofferAction(null);
     }
   };
 
@@ -472,6 +568,19 @@ export function DashboardPage() {
   const auditLog = (state.data.auditLog?.data ?? []) as AuditLogRow[];
   const offers = (state.data.offers?.data ?? []) as OfferRow[];
   const enrollments = (state.data.enrollments?.data ?? []) as EnrollmentRow[];
+  const adminEsUsers = users.filter(
+    (user) => user.role === "ES" && (user.status === "AVAILABLE" || user.status === "BUSY")
+  );
+  const adminFilteredEnrollments = enrollments.filter((row) => {
+    const matchesStatus =
+      adminEnrollmentStatusFilter === "ALL" || row.status === adminEnrollmentStatusFilter;
+    const search = adminEnrollmentSearch.trim().toLowerCase();
+    const matchesSearch =
+      search.length === 0 ||
+      row.premise_id.toLowerCase().includes(search) ||
+      String(row.id).includes(search);
+    return matchesStatus && matchesSearch;
+  });
   const statusCounts = users.reduce<Record<UserStatus, number>>(
     (counts, row) => {
       counts[row.status] += 1;
@@ -491,18 +600,64 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="top-bar-actions">
-          <button
-            className="btn-secondary"
-            type="button"
-            onClick={() => setSoundEnabled((enabled) => !enabled)}
-          >
-            Sound: {soundEnabled ? "On" : "Off"}
-          </button>
+          <label className="sound-control">
+            <span>Alert Volume {soundVolume}%</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={soundVolume}
+              onChange={(event) => setSoundVolume(Number(event.target.value))}
+            />
+          </label>
           <SignOutButton>
             <button className="btn-secondary" type="button">Sign out</button>
           </SignOutButton>
         </div>
       </header>
+
+      {sessionWarning && (
+        <div className="session-banner" role="alert">
+          <span>{sessionWarning}</span>
+          <button type="button" className="btn-secondary" onClick={() => setSessionWarning(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {role === "ES" && currentEsProfile && (
+        <section className="card">
+          <h2>My ES Controls</h2>
+          <p className="subtle">Set your language coverage and availability before receiving requests.</p>
+          <div className="maintenance-grid">
+            <label className="control-field">
+              <span>Status</span>
+              <select
+                value={currentEsProfile.status}
+                onChange={(event) => onMyStatusChange(event.target.value as UserStatus)}
+                disabled={activeUserAction === syncState.user?.id}
+              >
+                {USER_STATUSES.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </label>
+            <label className="control-field">
+              <span>Language</span>
+              <select
+                value={currentEsProfile.language ?? "English"}
+                onChange={(event) => onMyLanguageChange(event.target.value as UserLanguage)}
+                disabled={activeUserAction === syncState.user?.id}
+              >
+                {USER_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>{language}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+      )}
 
       <section className="grid">
         {state.data.users && (
@@ -586,7 +741,7 @@ export function DashboardPage() {
                         ) : (
                         <select
                           value={user.role}
-                          onChange={(event) => onUserRoleChange(user.id, event.target.value as UserRole)}
+                          onChange={(event) => requestUserRoleChange(user.id, event.target.value as UserRole)}
                           disabled={activeUserAction === user.id}
                         >
                           {USER_ROLES.map((role) => (
@@ -637,6 +792,99 @@ export function DashboardPage() {
                       <td className="mono">{entry.actor_clerk_id ?? "-"}</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Enrollment Queue Control</h2>
+            <p className="subtle">Filter queue, identify aging requests, and manually re-offer when needed.</p>
+            <div className="filter-row">
+              <label className="control-field">
+                <span>Search by ID/Premise</span>
+                <input
+                  type="text"
+                  value={adminEnrollmentSearch}
+                  onChange={(event) => setAdminEnrollmentSearch(event.target.value)}
+                  placeholder="e.g. 42 or TEST-PREMISE"
+                />
+              </label>
+              <label className="control-field">
+                <span>Status</span>
+                <select
+                  value={adminEnrollmentStatusFilter}
+                  onChange={(event) => setAdminEnrollmentStatusFilter(
+                    event.target.value as "ALL" | "WAITING" | "ASSIGNED" | "COMPLETED"
+                  )}
+                >
+                  <option value="ALL">All</option>
+                  <option value="WAITING">WAITING</option>
+                  <option value="ASSIGNED">ASSIGNED</option>
+                  <option value="COMPLETED">COMPLETED</option>
+                </select>
+              </label>
+            </div>
+            <div className="table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Premise</th>
+                    <th>Status</th>
+                    <th>Timeslot</th>
+                    <th>Age</th>
+                    <th>Assigned / Offered ES</th>
+                    <th>Re-offer To</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminFilteredEnrollments.map((row) => {
+                    const ageMinutes = Math.max(
+                      0,
+                      Math.floor((Date.now() - new Date(row.created_at).getTime()) / 60000)
+                    );
+                    const ageClass =
+                      ageMinutes >= 30 ? "status-badge blocked" : ageMinutes >= 15 ? "status-badge queued" : "status-badge waiting";
+                    return (
+                      <tr key={row.id}>
+                        <td>{row.id}</td>
+                        <td>{row.premise_id}</td>
+                        <td>{row.status}</td>
+                        <td>{formatTimeslot(row.timeslot)}</td>
+                        <td><span className={ageClass}>{ageMinutes}m</span></td>
+                        <td>{getEsDisplay(row)}</td>
+                        <td>
+                          <select
+                            value={reofferTargetByEnrollment[row.id] ?? ""}
+                            onChange={(event) => setReofferTargetByEnrollment((prev) => ({
+                              ...prev,
+                              [row.id]: event.target.value,
+                            }))}
+                            disabled={row.status !== "WAITING"}
+                          >
+                            <option value="">Select ES</option>
+                            {adminEsUsers.map((es) => (
+                              <option key={es.id} value={String(es.id)}>
+                                {es.name} ({es.status})
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => onAdminReofferEnrollment(row.id)}
+                            disabled={row.status !== "WAITING" || activeReofferAction === row.id}
+                          >
+                            Re-offer
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -764,7 +1012,7 @@ export function DashboardPage() {
                         <button
                           type="button"
                           className="btn-primary"
-                          onClick={() => onCompleteEnrollment(row.id)}
+                          onClick={() => requestCompleteEnrollment(row.id)}
                           disabled={activeEnrollmentAction === row.id}
                         >
                           Mark Completed
@@ -795,15 +1043,15 @@ export function DashboardPage() {
                     <button
                       type="button"
                       className="btn-primary"
-                      onClick={() => onOfferAction(row.id, "accept")}
-                      disabled={activeOfferAction === row.id}
+                          onClick={() => onOfferAction(row.id, "accept")}
+                          disabled={activeOfferAction === row.id}
                     >
                       Accept
                     </button>
                     <button
                       type="button"
                       className="btn-danger"
-                      onClick={() => onOfferAction(row.id, "reject")}
+                      onClick={() => requestOfferReject(row.id)}
                       disabled={activeOfferAction === row.id}
                     >
                       Reject
@@ -816,37 +1064,40 @@ export function DashboardPage() {
         </section>
       )}
 
-      {role === "ES" && currentEsProfile && (
-        <section className="card">
-          <h2>My ES Controls</h2>
-          <p className="subtle">Set your language coverage and availability before receiving requests.</p>
-          <div className="maintenance-grid">
-            <label className="control-field">
-              <span>Status</span>
-              <select
-                value={currentEsProfile.status}
-                onChange={(event) => onMyStatusChange(event.target.value as UserStatus)}
-                disabled={activeUserAction === syncState.user?.id}
+      {confirmState && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={confirmState.title}>
+          <div className="modal-card">
+            <h3>{confirmState.title}</h3>
+            <p>{confirmState.message}</p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setConfirmState(null)}
+                disabled={isConfirmingAction}
               >
-                {USER_STATUSES.map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-            </label>
-            <label className="control-field">
-              <span>Language</span>
-              <select
-                value={currentEsProfile.language ?? "English"}
-                onChange={(event) => onMyLanguageChange(event.target.value as UserLanguage)}
-                disabled={activeUserAction === syncState.user?.id}
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={async () => {
+                  if (!confirmState) return;
+                  setIsConfirmingAction(true);
+                  try {
+                    await confirmState.onConfirm();
+                  } finally {
+                    setIsConfirmingAction(false);
+                    setConfirmState(null);
+                  }
+                }}
+                disabled={isConfirmingAction}
               >
-                {USER_LANGUAGES.map((language) => (
-                  <option key={language} value={language}>{language}</option>
-                ))}
-              </select>
-            </label>
+                {isConfirmingAction ? "Applying..." : "Confirm"}
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
       )}
     </main>
   );

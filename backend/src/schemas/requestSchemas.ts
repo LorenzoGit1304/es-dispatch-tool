@@ -16,6 +16,10 @@ export const asEnrollmentRequestSchema = z.object({
   timeslot: z.string().min(1),
 });
 
+export const enrollmentReofferSchema = z.object({
+  es_id: z.number().int().positive(),
+});
+
 export const userCreateSchema = z.object({
   name: z.string().min(1),
   role: roleSchema,

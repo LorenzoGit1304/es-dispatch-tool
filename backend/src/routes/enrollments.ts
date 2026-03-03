@@ -5,6 +5,7 @@ import {
   asEnrollmentRequestSchema,
   enrollmentCreateSchema,
   enrollmentListQuerySchema,
+  enrollmentReofferSchema,
   idParamSchema,
 } from "../schemas/requestSchemas";
 import { apiError } from "../utils/apiError";
@@ -457,6 +458,129 @@ router.get("/my/requests", requireRole("AS"), validate(enrollmentListQuerySchema
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
+
+/* ======================================================
+   ADMIN: MANUALLY REOFFER WAITING ENROLLMENT TO SPECIFIC ES
+====================================================== */
+router.post(
+  "/:id/reoffer",
+  requireRole("ADMIN"),
+  validate(idParamSchema, "params"),
+  validate(enrollmentReofferSchema),
+  async (req, res) => {
+    const { id } = req.params;
+    const { es_id } = req.body;
+    const actorClerkId = getAuthenticatedClerkId(req);
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      const enrollmentResult = await client.query(
+        `SELECT * FROM enrollments WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (enrollmentResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return apiError(res, 404, "Enrollment not found", "ENROLLMENT_NOT_FOUND");
+      }
+
+      const enrollment = enrollmentResult.rows[0];
+      if (enrollment.status !== "WAITING") {
+        await client.query("ROLLBACK");
+        return apiError(
+          res,
+          400,
+          "Enrollment must be WAITING to reoffer",
+          "ENROLLMENT_NOT_WAITING"
+        );
+      }
+
+      const targetEsResult = await client.query(
+        `SELECT id, name, role, status
+         FROM users
+         WHERE id = $1
+         FOR UPDATE`,
+        [es_id]
+      );
+      if (targetEsResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return apiError(res, 404, "Target ES not found", "TARGET_ES_NOT_FOUND");
+      }
+
+      const targetEs = targetEsResult.rows[0];
+      if (targetEs.role !== "ES") {
+        await client.query("ROLLBACK");
+        return apiError(res, 400, "Target user is not an ES", "TARGET_NOT_ES");
+      }
+      if (!["AVAILABLE", "BUSY"].includes(targetEs.status)) {
+        await client.query("ROLLBACK");
+        return apiError(
+          res,
+          400,
+          "Target ES must be AVAILABLE or BUSY",
+          "TARGET_ES_NOT_ASSIGNABLE"
+        );
+      }
+
+      const expiredPendingResult = await client.query(
+        `UPDATE enrollment_offers
+         SET status = 'EXPIRED'
+         WHERE enrollment_id = $1
+           AND status = 'PENDING'
+         RETURNING id`,
+        [id]
+      );
+
+      const offerResult = await client.query(
+        `INSERT INTO enrollment_offers (enrollment_id, es_id, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '5 minutes')
+         RETURNING *`,
+        [id, es_id]
+      );
+      const offer = offerResult.rows[0];
+
+      if (targetEs.status === "AVAILABLE") {
+        await client.query(
+          `UPDATE users
+           SET last_assigned_at = NOW()
+           WHERE id = $1`,
+          [es_id]
+        );
+      }
+
+      await client.query("COMMIT");
+
+      await logAuditEvent({
+        actorClerkId,
+        actorUserId: await getActorUserId(pool, actorClerkId),
+        action: "ENROLLMENT_REOFFERED_BY_ADMIN",
+        entityType: "enrollment",
+        entityId: String(id),
+        before: enrollment,
+        after: enrollment,
+        metadata: {
+          offeredToEsId: es_id,
+          offeredToEsName: targetEs.name,
+          newOfferId: offer.id,
+          expiredPendingOffers: expiredPendingResult.rows.length,
+        },
+      });
+
+      return res.json({
+        message: "Enrollment reoffered successfully",
+        offered_to: targetEs.name,
+        offer,
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("Admin reoffer enrollment error:", error);
+      return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+    } finally {
+      client.release();
+    }
+  }
+);
 
 /* ======================================================
    ES: LIST MY ASSIGNED ENROLLMENTS
