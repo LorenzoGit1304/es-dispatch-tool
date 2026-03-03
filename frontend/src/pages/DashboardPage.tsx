@@ -1,6 +1,7 @@
 import { SignOutButton, useAuth } from "@clerk/clerk-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { playNotificationSound } from "../lib/soundNotifications";
 import type {
   AuditLogRow,
   DashboardData,
@@ -136,17 +137,33 @@ export function DashboardPage() {
   const [activeEnrollmentAction, setActiveEnrollmentAction] = useState<number | null>(null);
   const [activeStartAction, setActiveStartAction] = useState<number | null>(null);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    return window.localStorage.getItem("dispatch_sound_enabled") !== "false";
+  });
   const [requestForm, setRequestForm] = useState({
     premiseId: "",
     timeslot: "",
   });
+  const previousAsEnrollmentsRef = useRef<EnrollmentRow[] | null>(null);
+  const previousEsOffersRef = useRef<OfferRow[] | null>(null);
 
-  const loadDashboard = useCallback(async (role: UserRole) => {
-    setState((previous) => ({
-      ...previous,
-      loading: true,
-      error: null,
-    }));
+  const loadDashboard = useCallback(async (role: UserRole, options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setState((previous) => ({
+        ...previous,
+        loading: true,
+        error: null,
+      }));
+    } else {
+      setState((previous) => ({
+        ...previous,
+        error: null,
+      }));
+    }
 
     try {
       const data = await api.getDashboardData(getToken, role);
@@ -169,18 +186,112 @@ export function DashboardPage() {
   }, [loadDashboard, syncState.error, syncState.loading, syncState.user]);
 
   useEffect(() => {
-    if (syncState.loading || syncState.error || syncState.user?.role !== "AS") {
+    if (syncState.loading || syncState.error || !syncState.user) {
+      return;
+    }
+
+    if (syncState.user.role !== "AS" && syncState.user.role !== "ES") {
       return;
     }
 
     const intervalId = window.setInterval(() => {
-      loadDashboard("AS");
+      loadDashboard(syncState.user!.role, { silent: true });
     }, 10000);
 
     return () => {
       window.clearInterval(intervalId);
     };
   }, [loadDashboard, syncState.error, syncState.loading, syncState.user]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem("dispatch_sound_enabled", soundEnabled ? "true" : "false");
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    if (!soundEnabled || !state.data || state.data.role !== "ES") {
+      return;
+    }
+
+    const currentOffers = (state.data.offers?.data ?? []) as OfferRow[];
+    if (!previousEsOffersRef.current) {
+      previousEsOffersRef.current = currentOffers;
+      return;
+    }
+
+    const previousPendingIds = new Set(
+      previousEsOffersRef.current.filter((offer) => offer.status === "PENDING").map((offer) => offer.id)
+    );
+    const hasNewPendingOffer = currentOffers.some(
+      (offer) => offer.status === "PENDING" && !previousPendingIds.has(offer.id)
+    );
+
+    previousEsOffersRef.current = currentOffers;
+
+    if (!hasNewPendingOffer) {
+      return;
+    }
+
+    playNotificationSound("es_new_offer").catch(() => {});
+    setActionSuccess("New enrollment request received. Please review your offer queue.");
+  }, [soundEnabled, state.data]);
+
+  useEffect(() => {
+    if (!soundEnabled || !state.data || state.data.role !== "AS") {
+      return;
+    }
+
+    const currentEnrollments = (state.data.enrollments?.data ?? []) as EnrollmentRow[];
+    if (!previousAsEnrollmentsRef.current) {
+      previousAsEnrollmentsRef.current = currentEnrollments;
+      return;
+    }
+
+    const previousById = new Map(previousAsEnrollmentsRef.current.map((row) => [row.id, row]));
+    previousAsEnrollmentsRef.current = currentEnrollments;
+
+    for (const row of currentEnrollments) {
+      const previousRow = previousById.get(row.id);
+      if (!previousRow) {
+        continue;
+      }
+
+      if (previousRow.status === "WAITING" && row.status === "ASSIGNED") {
+        playNotificationSound("as_offer_accepted").catch(() => {});
+        setActionSuccess(getAsGuidance(row));
+        return;
+      }
+
+      const offerReassigned =
+        row.status === "WAITING" &&
+        previousRow.current_offer_es_id !== row.current_offer_es_id &&
+        (row.offer_attempt_count ?? 0) > (previousRow.offer_attempt_count ?? 0);
+      if (offerReassigned) {
+        playNotificationSound("as_offer_reassigned").catch(() => {});
+        setActionSuccess(getAsGuidance(row));
+        return;
+      }
+
+      const allRejectedNow =
+        row.status === "WAITING" &&
+        (previousRow.pending_offer_count ?? 0) > 0 &&
+        (row.pending_offer_count ?? 0) === 0 &&
+        row.current_offer_status === "REJECTED";
+      if (allRejectedNow) {
+        playNotificationSound("as_all_rejected").catch(() => {});
+        setActionSuccess(getAsGuidance(row));
+        return;
+      }
+
+      if (previousRow.status === "ASSIGNED" && row.status === "COMPLETED") {
+        playNotificationSound("as_completed").catch(() => {});
+        setActionSuccess(getAsGuidance(row));
+        return;
+      }
+    }
+  }, [soundEnabled, state.data]);
 
   const onUserStatusChange = async (userId: number, status: UserStatus) => {
     if (!syncState.user) {
@@ -379,9 +490,18 @@ export function DashboardPage() {
             Signed in as <strong>{syncState.user?.name}</strong> ({syncState.user?.role})
           </p>
         </div>
-        <SignOutButton>
-          <button className="btn-secondary" type="button">Sign out</button>
-        </SignOutButton>
+        <div className="top-bar-actions">
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => setSoundEnabled((enabled) => !enabled)}
+          >
+            Sound: {soundEnabled ? "On" : "Off"}
+          </button>
+          <SignOutButton>
+            <button className="btn-secondary" type="button">Sign out</button>
+          </SignOutButton>
+        </div>
       </header>
 
       <section className="grid">

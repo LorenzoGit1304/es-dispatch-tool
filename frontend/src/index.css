@@ -53,6 +53,12 @@ body {
   margin-bottom: 1.5rem;
 }
 
+.top-bar-actions {
+  display: inline-flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
 .top-bar h1 {
   margin: 0.15rem 0;
   font-family: "Space Grotesk", "Trebuchet MS", sans-serif;
@@ -355,6 +361,12 @@ body {
   .top-bar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .top-bar-actions {
+    width: 100%;
+    display: grid;
+    gap: 0.5rem;
   }
 
   .btn-secondary {
