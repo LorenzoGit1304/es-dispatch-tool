@@ -129,6 +129,89 @@ body {
   border-bottom: 0;
 }
 
+.maintenance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+
+.maintenance-stat {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  background: #fffdf8;
+}
+
+.maintenance-stat span {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.maintenance-stat strong {
+  font-size: 1.25rem;
+  color: var(--accent);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 0.92rem;
+  padding: 0.6rem 0.5rem;
+  vertical-align: middle;
+}
+
+.admin-table th {
+  color: var(--ink-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.74rem;
+}
+
+.admin-table select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0.35rem 0.45rem;
+  font-size: 0.88rem;
+}
+
+.inline-error {
+  margin: 0.5rem 0 0.75rem;
+  color: #9f2b2b;
+  font-weight: 600;
+}
+
+.locked-role-pill {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  background: #f7f1e5;
+  font-weight: 700;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.82rem;
+}
+
 .status-message {
   min-height: 100vh;
   margin: 0;

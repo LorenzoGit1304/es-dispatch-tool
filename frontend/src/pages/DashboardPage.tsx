@@ -1,7 +1,7 @@
 import { SignOutButton, useAuth } from "@clerk/clerk-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { DashboardData } from "../types/api";
+import type { AuditLogRow, DashboardData, UserRole, UserRow, UserStatus } from "../types/api";
 import { useSyncCurrentUser } from "../hooks/useSyncCurrentUser";
 
 type LoadState = {
@@ -9,6 +9,9 @@ type LoadState = {
   error: string | null;
   data: DashboardData | null;
 };
+
+const USER_ROLES: UserRole[] = ["ADMIN", "ES", "AS"];
+const USER_STATUSES: UserStatus[] = ["AVAILABLE", "BUSY", "UNAVAILABLE"];
 
 export function DashboardPage() {
   const { getToken } = useAuth();
@@ -18,34 +21,67 @@ export function DashboardPage() {
     error: null,
     data: null,
   });
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [activeUserAction, setActiveUserAction] = useState<number | null>(null);
+
+  const loadDashboard = useCallback(async (role: UserRole) => {
+    setState((previous) => ({
+      ...previous,
+      loading: true,
+      error: null,
+    }));
+
+    try {
+      const data = await api.getDashboardData(getToken, role);
+      setState({ loading: false, error: null, data });
+    } catch (error: unknown) {
+      setState({
+        loading: false,
+        error: error instanceof Error ? error.message : "Failed to load dashboard data",
+        data: null,
+      });
+    }
+  }, [getToken]);
 
   useEffect(() => {
     if (syncState.loading || syncState.error || !syncState.user) {
       return;
     }
 
-    let isCancelled = false;
+    loadDashboard(syncState.user.role);
+  }, [loadDashboard, syncState.error, syncState.loading, syncState.user]);
 
-    api.getDashboardData(getToken, syncState.user.role)
-      .then((data) => {
-        if (!isCancelled) {
-          setState({ loading: false, error: null, data });
-        }
-      })
-      .catch((error: unknown) => {
-        if (!isCancelled) {
-          setState({
-            loading: false,
-            error: error instanceof Error ? error.message : "Failed to load dashboard data",
-            data: null,
-          });
-        }
-      });
+  const onUserStatusChange = async (userId: number, status: UserStatus) => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActiveUserAction(userId);
+    try {
+      await api.updateUserStatus(getToken, userId, status);
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to update user status");
+    } finally {
+      setActiveUserAction(null);
+    }
+  };
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [getToken, syncState.error, syncState.loading, syncState.user]);
+  const onUserRoleChange = async (userId: number, role: UserRole) => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActiveUserAction(userId);
+    try {
+      await api.updateUserRole(getToken, userId, role);
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to update user role");
+    } finally {
+      setActiveUserAction(null);
+    }
+  };
 
   if (syncState.loading) {
     return <p className="status-message">Syncing your user profile...</p>;
@@ -62,6 +98,16 @@ export function DashboardPage() {
   if (state.error || !state.data) {
     return <p className="status-message error">{state.error ?? "No dashboard data available."}</p>;
   }
+
+  const users = (state.data.users?.data ?? []) as UserRow[];
+  const auditLog = (state.data.auditLog?.data ?? []) as AuditLogRow[];
+  const statusCounts = users.reduce<Record<UserStatus, number>>(
+    (counts, row) => {
+      counts[row.status] += 1;
+      return counts;
+    },
+    { AVAILABLE: 0, BUSY: 0, UNAVAILABLE: 0 }
+  );
 
   return (
     <main className="app-shell">
@@ -109,7 +155,117 @@ export function DashboardPage() {
         )}
       </section>
 
-      {state.data.enrollments && (
+      {state.data.role === "ADMIN" && (
+        <>
+          <section className="card">
+            <h2>Maintenance Overview</h2>
+            <div className="maintenance-grid">
+              <div className="maintenance-stat">
+                <span>Available ES Pool</span>
+                <strong>{statusCounts.AVAILABLE}</strong>
+              </div>
+              <div className="maintenance-stat">
+                <span>Busy ES Pool</span>
+                <strong>{statusCounts.BUSY}</strong>
+              </div>
+              <div className="maintenance-stat">
+                <span>Unavailable Users</span>
+                <strong>{statusCounts.UNAVAILABLE}</strong>
+              </div>
+              <div className="maintenance-stat">
+                <span>Recent Audit Events</span>
+                <strong>{auditLog.length}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>User Management</h2>
+            <p className="subtle">Update status and role assignments for dispatch operators.</p>
+            {actionError && <p className="inline-error">{actionError}</p>}
+            <div className="table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Last Assigned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((user) => (
+                    <tr key={user.id}>
+                      <td>{user.id}</td>
+                      <td>{user.name}</td>
+                      <td>
+                        {syncState.user?.role === "ADMIN" && user.id === syncState.user.id ? (
+                          <span className="locked-role-pill" title="You cannot remove your own ADMIN role.">
+                            ADMIN (locked)
+                          </span>
+                        ) : (
+                        <select
+                          value={user.role}
+                          onChange={(event) => onUserRoleChange(user.id, event.target.value as UserRole)}
+                          disabled={activeUserAction === user.id}
+                        >
+                          {USER_ROLES.map((role) => (
+                            <option key={role} value={role}>{role}</option>
+                          ))}
+                        </select>
+                        )}
+                      </td>
+                      <td>
+                        <select
+                          value={user.status}
+                          onChange={(event) => onUserStatusChange(user.id, event.target.value as UserStatus)}
+                          disabled={activeUserAction === user.id}
+                        >
+                          {USER_STATUSES.map((status) => (
+                            <option key={status} value={status}>{status}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>{user.last_assigned_at ? new Date(user.last_assigned_at).toLocaleString() : "Never"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Audit Log (Recent)</h2>
+            <div className="table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Action</th>
+                    <th>Entity</th>
+                    <th>Entity ID</th>
+                    <th>Actor Clerk ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLog.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{new Date(entry.created_at).toLocaleString()}</td>
+                      <td>{entry.action}</td>
+                      <td>{entry.entity_type}</td>
+                      <td>{entry.entity_id ?? "-"}</td>
+                      <td className="mono">{entry.actor_clerk_id ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+
+      {state.data.role !== "ADMIN" && state.data.enrollments && (
         <section className="card">
           <h2>{state.data.role === "AS" ? "My Enrollment Requests" : "Recent Enrollments"}</h2>
           <ul className="record-list">
@@ -124,7 +280,7 @@ export function DashboardPage() {
         </section>
       )}
 
-      {state.data.offers && (
+      {state.data.role !== "ADMIN" && state.data.offers && (
         <section className="card">
           <h2>{state.data.role === "ES" ? "My Offer Queue" : "Recent Offers"}</h2>
           <ul className="record-list">

@@ -9,6 +9,24 @@ export type ClerkPaginatedList = {
 };
 
 export type UserRole = "ADMIN" | "ES" | "AS";
+export type UserStatus = "AVAILABLE" | "BUSY" | "UNAVAILABLE";
+
+export type UserRow = {
+  id: number;
+  name: string;
+  role: UserRole;
+  status: UserStatus;
+  last_assigned_at: string | null;
+};
+
+export type AuditLogRow = {
+  id: number;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  actor_clerk_id: string | null;
+  created_at: string;
+};
 
 export type DashboardData = {
   role: UserRole;

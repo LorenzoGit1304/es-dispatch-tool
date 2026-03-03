@@ -1,7 +1,10 @@
 import type {
+  AuditLogRow,
   ClerkPaginatedList,
   DashboardData,
+  UserRow,
   UserRole,
+  UserStatus,
   UserSyncResponse,
 } from "../types/api";
 
@@ -42,7 +45,7 @@ async function request<T>(
 
 export const api = {
   getUsers: (getToken: TokenResolver) =>
-    request<ClerkPaginatedList>("/users?page=1&limit=5", getToken),
+    request<ClerkPaginatedList>("/users?page=1&limit=20", getToken),
   getEnrollments: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/enrollments?page=1&limit=5", getToken),
   getOffers: (getToken: TokenResolver) =>
@@ -52,7 +55,17 @@ export const api = {
   getMyOffers: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/offers/my?page=1&limit=5", getToken),
   getAuditLog: (getToken: TokenResolver) =>
-    request<ClerkPaginatedList>("/audit-log?page=1&limit=5", getToken),
+    request<ClerkPaginatedList>("/audit-log?page=1&limit=20", getToken),
+  updateUserStatus: (getToken: TokenResolver, userId: number, status: UserStatus) =>
+    request<UserRow>(`/users/${userId}/status`, getToken, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+  updateUserRole: (getToken: TokenResolver, userId: number, role: UserRole) =>
+    request<UserRow>(`/users/${userId}`, getToken, {
+      method: "PUT",
+      body: JSON.stringify({ role }),
+    }),
   syncUser: (
     getToken: TokenResolver,
     payload: { clerk_id: string; email: string; name: string }
@@ -69,7 +82,19 @@ export const api = {
         api.getOffers(getToken),
         api.getAuditLog(getToken),
       ]);
-      return { role, users, enrollments, offers, auditLog };
+      return {
+        role,
+        users: {
+          ...users,
+          data: users.data as UserRow[],
+        },
+        enrollments,
+        offers,
+        auditLog: {
+          ...auditLog,
+          data: auditLog.data as AuditLogRow[],
+        },
+      };
     }
 
     if (role === "ES") {

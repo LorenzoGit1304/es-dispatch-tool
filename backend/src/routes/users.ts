@@ -301,11 +301,21 @@ router.put(
   const actorClerkId = (req as any).auth?.userId ?? null;
 
   try {
+    const actorUserId = await getActorUserId(pool, actorClerkId);
     const beforeResult = await pool.query(
       "SELECT id, name, role, status, last_assigned_at FROM users WHERE id = $1",
       [id]
     );
     if (beforeResult.rows.length === 0) return apiError(res, 404, "User not found", "USER_NOT_FOUND");
+
+    if (role && actorUserId !== null && Number(id) === actorUserId && role !== "ADMIN") {
+      return apiError(
+        res,
+        400,
+        "Admin users cannot remove their own ADMIN role",
+        "ADMIN_SELF_ROLE_CHANGE_FORBIDDEN"
+      );
+    }
 
     const result = await pool.query(
       `UPDATE users
@@ -319,7 +329,7 @@ router.put(
 
     await logAuditEvent({
       actorClerkId,
-      actorUserId: await getActorUserId(pool, actorClerkId),
+      actorUserId,
       action: "USER_UPDATED",
       entityType: "user",
       entityId: String(id),
