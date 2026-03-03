@@ -224,6 +224,12 @@ body {
   font-weight: 600;
 }
 
+.inline-success {
+  margin: 0 0 0.75rem;
+  color: var(--ok);
+  font-weight: 700;
+}
+
 .locked-role-pill {
   display: inline-block;
   border: 1px solid var(--line);
@@ -262,6 +268,70 @@ body {
   color: var(--ink);
   padding: 0.45rem 0.55rem;
   font-size: 0.9rem;
+}
+
+.control-field input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.9rem;
+}
+
+.request-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.prompt-note {
+  color: #204a72;
+  font-weight: 600;
+}
+
+.status-badge {
+  display: inline-block;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f3eee3;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  line-height: 1.35;
+}
+
+.status-badge.active {
+  background: #e8f6ec;
+  border-color: #86caa1;
+  color: #1c6b41;
+}
+
+.status-badge.queued {
+  background: #fff3df;
+  border-color: #e3b56a;
+  color: #8a5a16;
+}
+
+.status-badge.pending,
+.status-badge.waiting {
+  background: #eef3ff;
+  border-color: #96b4ee;
+  color: #2b4f9f;
+}
+
+.status-badge.blocked {
+  background: #ffe8e8;
+  border-color: #e58c8c;
+  color: #9f2b2b;
+}
+
+.status-badge.complete {
+  background: #e4f7f0;
+  border-color: #7ac8ad;
+  color: #1f7456;
 }
 
 .status-message {

@@ -2,6 +2,7 @@ import type {
   AuditLogRow,
   ClerkPaginatedList,
   DashboardData,
+  EnrollmentRow,
   OfferRow,
   UserRow,
   UserLanguage,
@@ -53,7 +54,9 @@ export const api = {
   getOffers: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/offers?page=1&limit=5", getToken),
   getMyEnrollments: (getToken: TokenResolver) =>
-    request<ClerkPaginatedList>("/enrollments/my/requests?page=1&limit=5", getToken),
+    request<ClerkPaginatedList>("/enrollments/my/requests?page=1&limit=20", getToken),
+  getMyAssignedEnrollments: (getToken: TokenResolver) =>
+    request<ClerkPaginatedList>("/enrollments/my/assigned?page=1&limit=20", getToken),
   getMyOffers: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/offers/my?page=1&limit=5", getToken),
   getCurrentUser: (getToken: TokenResolver) =>
@@ -88,6 +91,27 @@ export const api = {
     request<{ message: string }>(`/offers/${offerId}/reject`, getToken, {
       method: "POST",
     }),
+  createTransferRequest: (
+    getToken: TokenResolver,
+    payload: { premise_id: string; timeslot: string }
+  ) =>
+    request<{
+      enrollment: EnrollmentRow;
+      offered_to: string;
+      offer: OfferRow;
+      queued_for_busy: boolean;
+    }>("/enrollments/request", getToken, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  completeEnrollment: (getToken: TokenResolver, enrollmentId: number) =>
+    request<{ message: string }>(`/enrollments/${enrollmentId}/complete`, getToken, {
+      method: "POST",
+    }),
+  startEnrollmentWork: (getToken: TokenResolver, enrollmentId: number) =>
+    request<{ message: string }>(`/enrollments/${enrollmentId}/start`, getToken, {
+      method: "POST",
+    }),
   syncUser: (
     getToken: TokenResolver,
     payload: { clerk_id: string; email: string; name: string }
@@ -120,9 +144,10 @@ export const api = {
     }
 
     if (role === "ES") {
-      const [offers, currentUser] = await Promise.all([
+      const [offers, currentUser, assignedEnrollments] = await Promise.all([
         api.getMyOffers(getToken),
         api.getCurrentUser(getToken),
+        api.getMyAssignedEnrollments(getToken),
       ]);
       return {
         role,
@@ -135,7 +160,10 @@ export const api = {
             totalPages: 1,
           },
         },
-        enrollments: null,
+        enrollments: {
+          ...assignedEnrollments,
+          data: assignedEnrollments.data as EnrollmentRow[],
+        },
         offers: {
           ...offers,
           data: offers.data as OfferRow[],
@@ -145,6 +173,15 @@ export const api = {
     }
 
     const enrollments = await api.getMyEnrollments(getToken);
-    return { role, users: null, enrollments, offers: null, auditLog: null };
+    return {
+      role,
+      users: null,
+      enrollments: {
+        ...enrollments,
+        data: enrollments.data as EnrollmentRow[],
+      },
+      offers: null,
+      auditLog: null,
+    };
   },
 };

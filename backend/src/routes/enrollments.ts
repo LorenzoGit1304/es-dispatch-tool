@@ -178,7 +178,7 @@ router.post("/request", requireRole("AS"), validate(asEnrollmentRequestSchema), 
 /* ======================================================
    COMPLETE ENROLLMENT
 ====================================================== */
-router.post("/:id/complete", requireRole("AS", "ADMIN"), async (req, res) => {
+router.post("/:id/complete", requireRole("ES", "ADMIN"), async (req, res) => {
   const { id } = req.params;
   const actorClerkId = getAuthenticatedClerkId(req);
   const currentUser = await getAuthenticatedDbUser(req, pool);
@@ -203,7 +203,7 @@ router.post("/:id/complete", requireRole("AS", "ADMIN"), async (req, res) => {
 
     const enrollment = enrollmentResult.rows[0];
 
-    if (currentUser.role === "AS" && enrollment.requested_by !== currentUser.id) {
+    if (currentUser.role === "ES" && enrollment.assigned_es_id !== currentUser.id) {
       await client.query("ROLLBACK");
       return apiError(res, 403, "Forbidden", "FORBIDDEN");
     }
@@ -223,10 +223,14 @@ router.post("/:id/complete", requireRole("AS", "ADMIN"), async (req, res) => {
 
     const freedEsResult = await client.query(
       `UPDATE users
-       SET status = 'AVAILABLE'
+       SET status = 'AVAILABLE',
+           current_enrollment_id = CASE
+             WHEN current_enrollment_id = $2 THEN NULL
+             ELSE current_enrollment_id
+           END
        WHERE id = $1
        RETURNING status`,
-      [enrollment.assigned_es_id]
+      [enrollment.assigned_es_id, id]
     );
 
     await client.query("COMMIT");
@@ -252,6 +256,72 @@ router.post("/:id/complete", requireRole("AS", "ADMIN"), async (req, res) => {
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   } finally {
     client.release();
+  }
+});
+
+/* ======================================================
+   ES: MARK ENROLLMENT AS CURRENTLY WORKING
+====================================================== */
+router.post("/:id/start", requireRole("ES", "ADMIN"), async (req, res) => {
+  const { id } = req.params;
+  const actorClerkId = getAuthenticatedClerkId(req);
+  const currentUser = await getAuthenticatedDbUser(req, pool);
+  if (!currentUser) {
+    return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+  }
+
+  try {
+    const enrollmentResult = await pool.query(
+      `SELECT id, assigned_es_id, status
+       FROM enrollments
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (enrollmentResult.rows.length === 0) {
+      return apiError(res, 404, "Enrollment not found", "ENROLLMENT_NOT_FOUND");
+    }
+
+    const enrollment = enrollmentResult.rows[0];
+    if (enrollment.status !== "ASSIGNED") {
+      return apiError(res, 400, "Enrollment must be assigned before starting", "ENROLLMENT_NOT_ASSIGNED");
+    }
+
+    if (currentUser.role === "ES" && enrollment.assigned_es_id !== currentUser.id) {
+      return apiError(res, 403, "Forbidden", "FORBIDDEN");
+    }
+
+    const targetEsId = currentUser.role === "ADMIN" ? enrollment.assigned_es_id : currentUser.id;
+    if (!targetEsId) {
+      return apiError(res, 400, "Enrollment has no assigned ES", "ENROLLMENT_NOT_ASSIGNED");
+    }
+
+    const beforeResult = await pool.query(
+      "SELECT current_enrollment_id FROM users WHERE id = $1",
+      [targetEsId]
+    );
+
+    await pool.query(
+      `UPDATE users
+       SET current_enrollment_id = $1
+       WHERE id = $2`,
+      [id, targetEsId]
+    );
+
+    await logAuditEvent({
+      actorClerkId,
+      actorUserId: await getActorUserId(pool, actorClerkId),
+      action: "ENROLLMENT_WORK_STARTED",
+      entityType: "enrollment",
+      entityId: String(id),
+      before: { current_enrollment_id: beforeResult.rows[0]?.current_enrollment_id ?? null },
+      after: { current_enrollment_id: Number(id), es_id: targetEsId },
+    });
+
+    return res.json({ message: "Current working enrollment updated" });
+  } catch (error) {
+    console.error("Start enrollment work error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });
 
@@ -325,25 +395,49 @@ router.get("/my/requests", requireRole("AS"), validate(enrollmentListQuerySchema
   const offset = (page - 1) * limit;
 
   const params: Array<string | number> = [currentUser.id];
-  let whereClause = "WHERE requested_by = $1";
+  let whereClause = "WHERE e.requested_by = $1";
   if (status) {
     params.push(status);
-    whereClause += ` AND status = $${params.length}`;
+    whereClause += ` AND e.status = $${params.length}`;
   }
 
   try {
     const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total FROM enrollments ${whereClause}`,
+      `SELECT COUNT(*)::int AS total FROM enrollments e ${whereClause}`,
       params
     );
     const total = countResult.rows[0]?.total ?? 0;
 
     const dataParams = [...params, limit, offset];
     const result = await pool.query(
-      `SELECT *
-       FROM enrollments
+      `SELECT e.*,
+              assigned.name AS assigned_es_name,
+              assigned.current_enrollment_id AS es_current_enrollment_id,
+              current_work.premise_id AS es_current_premise_id,
+              latest_offer.es_id AS current_offer_es_id,
+              latest_offer.es_name AS current_offer_es_name,
+              latest_offer.offer_status AS current_offer_status,
+              offer_stats.offer_attempt_count,
+              offer_stats.pending_offer_count
+       FROM enrollments e
+       LEFT JOIN users assigned ON assigned.id = e.assigned_es_id
+       LEFT JOIN enrollments current_work ON current_work.id = assigned.current_enrollment_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS offer_attempt_count,
+                COUNT(*) FILTER (WHERE o.status = 'PENDING')::int AS pending_offer_count
+         FROM enrollment_offers o
+         WHERE o.enrollment_id = e.id
+       ) offer_stats ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT o.es_id, u.name AS es_name, o.status AS offer_status
+         FROM enrollment_offers o
+         JOIN users u ON u.id = o.es_id
+         WHERE o.enrollment_id = e.id
+         ORDER BY o.offered_at DESC
+         LIMIT 1
+       ) latest_offer ON TRUE
        ${whereClause}
-       ORDER BY created_at DESC
+       ORDER BY e.created_at DESC
        LIMIT $${dataParams.length - 1}
        OFFSET $${dataParams.length}`,
       dataParams
@@ -360,6 +454,63 @@ router.get("/my/requests", requireRole("AS"), validate(enrollmentListQuerySchema
     });
   } catch (error) {
     console.error("Fetch my enrollments error:", error);
+    return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
+  }
+});
+
+/* ======================================================
+   ES: LIST MY ASSIGNED ENROLLMENTS
+====================================================== */
+router.get("/my/assigned", requireRole("ES"), validate(enrollmentListQuerySchema, "query"), async (req, res) => {
+  const currentUser = await getAuthenticatedDbUser(req, pool);
+  if (!currentUser) {
+    return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
+  }
+
+  const { page, limit, status } = req.query as unknown as {
+    page: number;
+    limit: number;
+    status?: "WAITING" | "ASSIGNED" | "COMPLETED";
+  };
+  const offset = (page - 1) * limit;
+
+  const params: Array<string | number> = [currentUser.id];
+  let whereClause = "WHERE e.assigned_es_id = $1";
+  if (status) {
+    params.push(status);
+    whereClause += ` AND e.status = $${params.length}`;
+  }
+
+  try {
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM enrollments e ${whereClause}`,
+      params
+    );
+    const total = countResult.rows[0]?.total ?? 0;
+
+    const dataParams = [...params, limit, offset];
+    const result = await pool.query(
+      `SELECT e.*, requester.name AS requested_by_name
+       FROM enrollments e
+       LEFT JOIN users requester ON requester.id = e.requested_by
+       ${whereClause}
+       ORDER BY e.created_at DESC
+       LIMIT $${dataParams.length - 1}
+       OFFSET $${dataParams.length}`,
+      dataParams
+    );
+
+    return res.json({
+      data: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Fetch my assigned enrollments error:", error);
     return apiError(res, 500, "Internal server error", "INTERNAL_SERVER_ERROR");
   }
 });

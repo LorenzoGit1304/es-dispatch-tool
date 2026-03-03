@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import type {
   AuditLogRow,
   DashboardData,
+  EnrollmentRow,
   OfferRow,
   UserLanguage,
   UserRole,
@@ -21,6 +22,104 @@ type LoadState = {
 const USER_ROLES: UserRole[] = ["ADMIN", "ES", "AS"];
 const USER_STATUSES: UserStatus[] = ["AVAILABLE", "BUSY", "UNAVAILABLE"];
 const USER_LANGUAGES: UserLanguage[] = ["English", "Spanish", "Both"];
+const AS_TIMESLOTS = [
+  "9:00 AM - 11:00 AM",
+  "10:00 AM - 12:00 PM",
+  "11:00 AM - 1:00 PM",
+  "12:00 PM - 2:00 PM",
+  "1:00 PM - 3:00 PM",
+  "2:00 PM - 4:00 PM",
+  "3:00 PM - 5:00 PM",
+  "4:00 PM - 6:00 PM",
+  "5:00 PM - 7:00 PM",
+] as const;
+
+const formatTimeslot = (value: string): string => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+};
+
+const getAsGuidance = (row: EnrollmentRow): string => {
+  const assignedEs = row.assigned_es_name ?? (row.assigned_es_id ? `ES #${row.assigned_es_id}` : null);
+  const offeredEs = row.current_offer_es_name ?? (row.current_offer_es_id ? `ES #${row.current_offer_es_id}` : null);
+  const attempts = row.offer_attempt_count ?? 0;
+  const pendingOffers = row.pending_offer_count ?? 0;
+
+  if (row.status === "ASSIGNED" && assignedEs && row.es_current_enrollment_id && row.es_current_enrollment_id !== row.id) {
+    return `${assignedEs} is currently working enrollment #${row.es_current_enrollment_id} (${row.es_current_premise_id ?? "another premise"}). Your request is queued.`;
+  }
+  if (row.status === "ASSIGNED" && assignedEs) {
+    return `${assignedEs} accepted the request. Transfer the customer now.`;
+  }
+  if (row.status === "WAITING" && row.current_offer_status === "REJECTED" && pendingOffers === 0) {
+    return "All ES rejected this request. Please schedule the customer for another day.";
+  }
+  if (row.status === "WAITING" && offeredEs && attempts > 1) {
+    return `Request reassigned to ${offeredEs}. Please wait for confirmation.`;
+  }
+  if (row.status === "WAITING" && offeredEs) {
+    return `Request sent to ${offeredEs}. Please wait for confirmation.`;
+  }
+  if (row.status === "COMPLETED") {
+    return "Completed by ES.";
+  }
+
+  return "-";
+};
+
+const getEsWorkStatus = (row: EnrollmentRow): string => {
+  if (row.status === "COMPLETED") {
+    return "Completed";
+  }
+
+  if (row.status === "ASSIGNED") {
+    if (row.es_current_enrollment_id === row.id) {
+      return "ES is currently working this enrollment";
+    }
+    if (row.es_current_enrollment_id) {
+      return `ES is busy on enrollment #${row.es_current_enrollment_id}`;
+    }
+    return "Assigned, pending ES start";
+  }
+
+  if (row.status === "WAITING" && (row.pending_offer_count ?? 0) > 0) {
+    return "Waiting for ES response";
+  }
+
+  if (row.status === "WAITING" && row.current_offer_status === "REJECTED" && (row.pending_offer_count ?? 0) === 0) {
+    return "No ES currently available";
+  }
+
+  return "-";
+};
+
+const getEsWorkStatusBadgeClass = (row: EnrollmentRow): string => {
+  if (row.status === "COMPLETED") return "status-badge complete";
+  if (row.status === "ASSIGNED" && row.es_current_enrollment_id === row.id) return "status-badge active";
+  if (row.status === "ASSIGNED" && row.es_current_enrollment_id) return "status-badge queued";
+  if (row.status === "ASSIGNED") return "status-badge pending";
+  if (row.status === "WAITING" && (row.pending_offer_count ?? 0) > 0) return "status-badge waiting";
+  if (row.status === "WAITING" && row.current_offer_status === "REJECTED" && (row.pending_offer_count ?? 0) === 0) {
+    return "status-badge blocked";
+  }
+  return "status-badge";
+};
+
+const getEsDisplay = (row: EnrollmentRow): string => {
+  if (row.assigned_es_name) {
+    return row.assigned_es_name;
+  }
+  if (row.assigned_es_id) {
+    return `ES #${row.assigned_es_id}`;
+  }
+  if (row.current_offer_es_name) {
+    return row.current_offer_es_name;
+  }
+  if (row.current_offer_es_id) {
+    return `ES #${row.current_offer_es_id}`;
+  }
+  return "-";
+};
 
 export function DashboardPage() {
   const { getToken } = useAuth();
@@ -31,8 +130,16 @@ export function DashboardPage() {
     data: null,
   });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [activeUserAction, setActiveUserAction] = useState<number | null>(null);
   const [activeOfferAction, setActiveOfferAction] = useState<number | null>(null);
+  const [activeEnrollmentAction, setActiveEnrollmentAction] = useState<number | null>(null);
+  const [activeStartAction, setActiveStartAction] = useState<number | null>(null);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [requestForm, setRequestForm] = useState({
+    premiseId: "",
+    timeslot: "",
+  });
 
   const loadDashboard = useCallback(async (role: UserRole) => {
     setState((previous) => ({
@@ -61,11 +168,26 @@ export function DashboardPage() {
     loadDashboard(syncState.user.role);
   }, [loadDashboard, syncState.error, syncState.loading, syncState.user]);
 
+  useEffect(() => {
+    if (syncState.loading || syncState.error || syncState.user?.role !== "AS") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      loadDashboard("AS");
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loadDashboard, syncState.error, syncState.loading, syncState.user]);
+
   const onUserStatusChange = async (userId: number, status: UserStatus) => {
     if (!syncState.user) {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     setActiveUserAction(userId);
     try {
       await api.updateUserStatus(getToken, userId, status);
@@ -82,6 +204,7 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     setActiveUserAction(userId);
     try {
       await api.updateUserRole(getToken, userId, role);
@@ -98,6 +221,7 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     setActiveUserAction(syncState.user.id);
     try {
       await api.updateMyStatus(getToken, status);
@@ -114,6 +238,7 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     setActiveUserAction(syncState.user.id);
     try {
       await api.updateMyLanguage(getToken, language);
@@ -130,18 +255,87 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     setActiveOfferAction(offerId);
     try {
       if (action === "accept") {
         await api.acceptOffer(getToken, offerId);
+        setActionSuccess("Offer accepted.");
       } else {
         await api.rejectOffer(getToken, offerId);
+        setActionSuccess("Offer rejected and reassigned.");
       }
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
       setActionError(error instanceof Error ? error.message : "Failed to process offer");
     } finally {
       setActiveOfferAction(null);
+    }
+  };
+
+  const onCreateTransferRequest = async () => {
+    if (!syncState.user) {
+      return;
+    }
+
+    const premiseId = requestForm.premiseId.trim();
+    const selectedTimeslot = requestForm.timeslot.trim();
+    if (!premiseId || !selectedTimeslot) {
+      setActionError("Premise ID and timeslot are required.");
+      return;
+    }
+
+    setActionError(null);
+    setActionSuccess(null);
+    setIsSubmittingRequest(true);
+    try {
+      await api.createTransferRequest(getToken, {
+        premise_id: premiseId,
+        timeslot: selectedTimeslot,
+      });
+      setRequestForm({ premiseId: "", timeslot: "" });
+      setActionSuccess("Transfer request created.");
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to create transfer request");
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  };
+
+  const onCompleteEnrollment = async (enrollmentId: number) => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActionSuccess(null);
+    setActiveEnrollmentAction(enrollmentId);
+    try {
+      await api.completeEnrollment(getToken, enrollmentId);
+      setActionSuccess("Enrollment marked as completed.");
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to complete enrollment");
+    } finally {
+      setActiveEnrollmentAction(null);
+    }
+  };
+
+  const onStartEnrollmentWork = async (enrollmentId: number) => {
+    if (!syncState.user) {
+      return;
+    }
+    setActionError(null);
+    setActionSuccess(null);
+    setActiveStartAction(enrollmentId);
+    try {
+      await api.startEnrollmentWork(getToken, enrollmentId);
+      setActionSuccess(`You are now marked as working enrollment #${enrollmentId}.`);
+      await loadDashboard(syncState.user.role);
+    } catch (error: unknown) {
+      setActionError(error instanceof Error ? error.message : "Failed to mark current enrollment");
+    } finally {
+      setActiveStartAction(null);
     }
   };
 
@@ -166,6 +360,7 @@ export function DashboardPage() {
   const currentEsProfile = role === "ES" ? users[0] ?? null : null;
   const auditLog = (state.data.auditLog?.data ?? []) as AuditLogRow[];
   const offers = (state.data.offers?.data ?? []) as OfferRow[];
+  const enrollments = (state.data.enrollments?.data ?? []) as EnrollmentRow[];
   const statusCounts = users.reduce<Record<UserStatus, number>>(
     (counts, row) => {
       counts[row.status] += 1;
@@ -247,7 +442,6 @@ export function DashboardPage() {
           <section className="card">
             <h2>User Management</h2>
             <p className="subtle">Update status and role assignments for dispatch operators.</p>
-            {actionError && <p className="inline-error">{actionError}</p>}
             <div className="table-wrap">
               <table className="admin-table">
                 <thead>
@@ -330,18 +524,140 @@ export function DashboardPage() {
         </>
       )}
 
-      {role !== "ADMIN" && state.data.enrollments && (
+      {actionSuccess && <p className="inline-success">{actionSuccess}</p>}
+      {actionError && <p className="inline-error">{actionError}</p>}
+
+      {role === "AS" && (
         <section className="card">
-          <h2>{role === "AS" ? "My Enrollment Requests" : "Recent Enrollments"}</h2>
-          <ul className="record-list">
-            {state.data.enrollments.data.map((row) => (
-              <li key={String(row.id)}>
-                <span>#{String(row.id)}</span>
-                <span>{String(row.premise_id ?? "-")}</span>
-                <span>{String(row.status ?? "-")}</span>
-              </li>
-            ))}
-          </ul>
+          <h2>Create Transfer Request</h2>
+          <p className="subtle">Submit a premise and appointment slot to dispatch to available ES users.</p>
+          <div className="request-form">
+            <label className="control-field">
+              <span>Premise ID</span>
+              <input
+                type="text"
+                value={requestForm.premiseId}
+                onChange={(event) => setRequestForm((prev) => ({ ...prev, premiseId: event.target.value }))}
+                placeholder="TEST-PREMISE-001"
+              />
+            </label>
+            <label className="control-field">
+              <span>Timeslot</span>
+              <select
+                value={requestForm.timeslot}
+                onChange={(event) => setRequestForm((prev) => ({ ...prev, timeslot: event.target.value }))}
+              >
+                <option value="">Select a slot</option>
+                {AS_TIMESLOTS.map((slot) => (
+                  <option key={slot} value={slot}>{slot}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={onCreateTransferRequest}
+              disabled={isSubmittingRequest}
+            >
+              {isSubmittingRequest ? "Submitting..." : "Create Request"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {role === "AS" && state.data.enrollments && (
+        <section className="card">
+          <h2>My Enrollment Requests</h2>
+          <div className="table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Premise</th>
+                  <th>Timeslot</th>
+                  <th>Status</th>
+                  <th>Assigned / Offered ES</th>
+                  <th>ES Work Status</th>
+                  <th>Guidance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enrollments.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.id}</td>
+                    <td>{row.premise_id}</td>
+                    <td>{formatTimeslot(row.timeslot)}</td>
+                    <td>{row.status}</td>
+                    <td>{getEsDisplay(row)}</td>
+                    <td>
+                      <span className={getEsWorkStatusBadgeClass(row)}>{getEsWorkStatus(row)}</span>
+                    </td>
+                    <td className="prompt-note">{getAsGuidance(row)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {role === "ES" && state.data.enrollments && (
+        <section className="card">
+          <h2>My Assigned Enrollments</h2>
+          <div className="table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Premise</th>
+                  <th>Timeslot</th>
+                  <th>Status</th>
+                  <th>Requested By</th>
+                  <th>Current Work</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enrollments.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.id}</td>
+                    <td>{row.premise_id}</td>
+                    <td>{formatTimeslot(row.timeslot)}</td>
+                    <td>{row.status}</td>
+                    <td>{row.requested_by_name ?? row.requested_by}</td>
+                    <td>
+                      {row.es_current_enrollment_id === row.id ? (
+                        <span className="locked-role-pill">Currently Working</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => onStartEnrollmentWork(row.id)}
+                          disabled={row.status !== "ASSIGNED" || activeStartAction === row.id}
+                        >
+                          Set Current
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      {row.status === "ASSIGNED" ? (
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={() => onCompleteEnrollment(row.id)}
+                          disabled={activeEnrollmentAction === row.id}
+                        >
+                          Mark Completed
+                        </button>
+                      ) : (
+                        <span className="subtle">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
@@ -384,7 +700,6 @@ export function DashboardPage() {
         <section className="card">
           <h2>My ES Controls</h2>
           <p className="subtle">Set your language coverage and availability before receiving requests.</p>
-          {actionError && <p className="inline-error">{actionError}</p>}
           <div className="maintenance-grid">
             <label className="control-field">
               <span>Status</span>

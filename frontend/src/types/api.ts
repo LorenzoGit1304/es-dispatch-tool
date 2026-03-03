@@ -33,6 +33,27 @@ export type OfferRow = {
   responded_at: string | null;
 };
 
+export type EnrollmentStatus = "WAITING" | "ASSIGNED" | "COMPLETED";
+
+export type EnrollmentRow = {
+  id: number;
+  premise_id: string;
+  requested_by: number;
+  timeslot: string;
+  status: EnrollmentStatus;
+  created_at: string;
+  assigned_es_id: number | null;
+  assigned_es_name?: string | null;
+  current_offer_es_id?: number | null;
+  current_offer_es_name?: string | null;
+  current_offer_status?: OfferStatus | null;
+  offer_attempt_count?: number;
+  pending_offer_count?: number;
+  requested_by_name?: string | null;
+  es_current_enrollment_id?: number | null;
+  es_current_premise_id?: string | null;
+};
+
 export type AuditLogRow = {
   id: number;
   action: string;
