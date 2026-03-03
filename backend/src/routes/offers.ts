@@ -243,9 +243,10 @@ router.get("/my", requireRole("ES"), validate(paginationQuerySchema, "query"), a
     const total = countResult.rows[0]?.total ?? 0;
 
     const result = await pool.query(
-      `SELECT *
-       FROM enrollment_offers
-       WHERE es_id = $1
+      `SELECT o.*, e.premise_id
+       FROM enrollment_offers o
+       JOIN enrollments e ON e.id = o.enrollment_id
+       WHERE o.es_id = $1
        ORDER BY offered_at DESC
        LIMIT $2 OFFSET $3`,
       [currentUser.id, limit, offset]
@@ -282,7 +283,8 @@ router.get("/:id", validate(idParamSchema, "params"), async (req, res) => {
               u.name AS es_name,
               u.email AS es_email,
               e.status AS enrollment_status,
-              e.requested_by
+              e.requested_by,
+              e.premise_id
        FROM enrollment_offers o
        JOIN users u ON u.id = o.es_id
        JOIN enrollments e ON e.id = o.enrollment_id
@@ -322,8 +324,9 @@ router.get("/", requireRole("ADMIN"), validate(paginationQuerySchema, "query"), 
     const total = countResult.rows[0]?.total ?? 0;
 
     const result = await pool.query(
-      `SELECT *
-       FROM enrollment_offers
+      `SELECT o.*, e.premise_id
+       FROM enrollment_offers o
+       JOIN enrollments e ON e.id = o.enrollment_id
        ORDER BY offered_at DESC
        LIMIT $1 OFFSET $2`,
       [limit, offset]

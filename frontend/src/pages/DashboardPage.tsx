@@ -20,6 +20,12 @@ type LoadState = {
   data: DashboardData | null;
 };
 
+type ToastItem = {
+  id: number;
+  tone: "success" | "error" | "info";
+  message: string;
+};
+
 type ConfirmState = {
   title: string;
   message: string;
@@ -137,7 +143,7 @@ export function DashboardPage() {
     data: null,
   });
   const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [activeUserAction, setActiveUserAction] = useState<number | null>(null);
   const [activeOfferAction, setActiveOfferAction] = useState<number | null>(null);
   const [activeEnrollmentAction, setActiveEnrollmentAction] = useState<number | null>(null);
@@ -164,16 +170,46 @@ export function DashboardPage() {
   const [adminEnrollmentStatusFilter, setAdminEnrollmentStatusFilter] = useState<
     "ALL" | "WAITING" | "ASSIGNED" | "COMPLETED"
   >("ALL");
+  const [adminUserRoleFilter, setAdminUserRoleFilter] = useState<"ALL" | UserRole>("ALL");
+  const [adminUserStatusFilter, setAdminUserStatusFilter] = useState<"ALL" | UserStatus>("ALL");
+  const [adminUserLanguageFilter, setAdminUserLanguageFilter] = useState<"ALL" | UserLanguage>("ALL");
+  const [asStatusFilter, setAsStatusFilter] = useState<"ALL" | "WAITING" | "ASSIGNED" | "COMPLETED">("ALL");
+  const [asPremiseSearch, setAsPremiseSearch] = useState("");
+  const [esOfferFilter, setEsOfferFilter] = useState<"ALL" | "PENDING">("ALL");
+  const [esAssignmentFilter, setEsAssignmentFilter] = useState<"ALL" | "ACTIVE">("ALL");
+  const [esPremiseSearch, setEsPremiseSearch] = useState("");
   const [reofferTargetByEnrollment, setReofferTargetByEnrollment] = useState<Record<number, string>>({});
 
   const handleActionError = (error: unknown, fallbackMessage: string) => {
     const message = error instanceof Error ? error.message : fallbackMessage;
     setActionError(message);
+    pushToast("error", message);
 
     if (error instanceof ApiRequestError && (error.status === 401 || error.code === "UNAUTHORIZED")) {
       setSessionWarning("Your session expired or became invalid. Please sign in again.");
     }
   };
+
+  const pushToast = useCallback((tone: ToastItem["tone"], message: string) => {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((prev) => [...prev, { id, tone, message }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((item) => item.id !== id));
+    }, 3800);
+  }, []);
+
+  const copyText = useCallback(async (label: string, value: string | number | null | undefined) => {
+    if (value === null || value === undefined || String(value).trim().length === 0) {
+      pushToast("error", `No ${label} to copy.`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(String(value));
+      pushToast("success", `${label} copied.`);
+    } catch {
+      pushToast("error", `Could not copy ${label}.`);
+    }
+  }, [pushToast]);
 
   const openConfirm = (title: string, message: string, onConfirm: () => Promise<void>) => {
     setConfirmState({ title, message, onConfirm });
@@ -277,8 +313,8 @@ export function DashboardPage() {
     }
 
     playNotificationSound("es_new_offer").catch(() => {});
-    setActionSuccess("New enrollment request received. Please review your offer queue.");
-  }, [soundVolume, state.data]);
+    pushToast("info", "New enrollment request received. Please review your offer queue.");
+  }, [pushToast, soundVolume, state.data]);
 
   useEffect(() => {
     if (soundVolume <= 0 || !state.data || state.data.role !== "AS") {
@@ -302,7 +338,7 @@ export function DashboardPage() {
 
       if (previousRow.status === "WAITING" && row.status === "ASSIGNED") {
         playNotificationSound("as_offer_accepted").catch(() => {});
-        setActionSuccess(getAsGuidance(row));
+        pushToast("info", getAsGuidance(row));
         return;
       }
 
@@ -312,7 +348,7 @@ export function DashboardPage() {
         (row.offer_attempt_count ?? 0) > (previousRow.offer_attempt_count ?? 0);
       if (offerReassigned) {
         playNotificationSound("as_offer_reassigned").catch(() => {});
-        setActionSuccess(getAsGuidance(row));
+        pushToast("info", getAsGuidance(row));
         return;
       }
 
@@ -323,24 +359,23 @@ export function DashboardPage() {
         row.current_offer_status === "REJECTED";
       if (allRejectedNow) {
         playNotificationSound("as_all_rejected").catch(() => {});
-        setActionSuccess(getAsGuidance(row));
+        pushToast("info", getAsGuidance(row));
         return;
       }
 
       if (previousRow.status === "ASSIGNED" && row.status === "COMPLETED") {
         playNotificationSound("as_completed").catch(() => {});
-        setActionSuccess(getAsGuidance(row));
+        pushToast("info", getAsGuidance(row));
         return;
       }
     }
-  }, [soundVolume, state.data]);
+  }, [pushToast, soundVolume, state.data]);
 
   const onUserStatusChange = async (userId: number, status: UserStatus) => {
     if (!syncState.user) {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveUserAction(userId);
     try {
       await api.updateUserStatus(getToken, userId, status);
@@ -357,7 +392,6 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveUserAction(userId);
     try {
       await api.updateUserRole(getToken, userId, role);
@@ -382,7 +416,6 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveUserAction(syncState.user.id);
     try {
       await api.updateMyStatus(getToken, status);
@@ -399,7 +432,6 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveUserAction(syncState.user.id);
     try {
       await api.updateMyLanguage(getToken, language);
@@ -416,15 +448,14 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveOfferAction(offerId);
     try {
       if (action === "accept") {
         await api.acceptOffer(getToken, offerId);
-        setActionSuccess("Offer accepted.");
+        pushToast("success", "Offer accepted.");
       } else {
         await api.rejectOffer(getToken, offerId);
-        setActionSuccess("Offer rejected and reassigned.");
+        pushToast("success", "Offer rejected and reassigned.");
       }
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
@@ -455,7 +486,6 @@ export function DashboardPage() {
     }
 
     setActionError(null);
-    setActionSuccess(null);
     setIsSubmittingRequest(true);
     try {
       await api.createTransferRequest(getToken, {
@@ -463,7 +493,7 @@ export function DashboardPage() {
         timeslot: selectedTimeslot,
       });
       setRequestForm({ premiseId: "", timeslot: "" });
-      setActionSuccess("Transfer request created.");
+      pushToast("success", "Transfer request created.");
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
       handleActionError(error, "Failed to create transfer request");
@@ -477,11 +507,10 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveEnrollmentAction(enrollmentId);
     try {
       await api.completeEnrollment(getToken, enrollmentId);
-      setActionSuccess("Enrollment marked as completed.");
+      pushToast("success", "Enrollment marked as completed.");
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
       handleActionError(error, "Failed to complete enrollment");
@@ -503,11 +532,10 @@ export function DashboardPage() {
       return;
     }
     setActionError(null);
-    setActionSuccess(null);
     setActiveStartAction(enrollmentId);
     try {
       await api.startEnrollmentWork(getToken, enrollmentId);
-      setActionSuccess(`You are now marked as working enrollment #${enrollmentId}.`);
+      pushToast("success", `You are now marked as working enrollment #${enrollmentId}.`);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
       handleActionError(error, "Failed to mark current enrollment");
@@ -533,11 +561,10 @@ export function DashboardPage() {
     }
 
     setActionError(null);
-    setActionSuccess(null);
     setActiveReofferAction(enrollmentId);
     try {
       const result = await api.reofferEnrollment(getToken, enrollmentId, targetEsId);
-      setActionSuccess(`Enrollment #${enrollmentId} re-offered to ${result.offered_to}.`);
+      pushToast("success", `Enrollment #${enrollmentId} re-offered to ${result.offered_to}.`);
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
       handleActionError(error, "Failed to re-offer enrollment");
@@ -571,6 +598,13 @@ export function DashboardPage() {
   const adminEsUsers = users.filter(
     (user) => user.role === "ES" && (user.status === "AVAILABLE" || user.status === "BUSY")
   );
+  const adminFilteredUsers = users.filter((user) => {
+    const matchesRole = adminUserRoleFilter === "ALL" || user.role === adminUserRoleFilter;
+    const matchesStatus = adminUserStatusFilter === "ALL" || user.status === adminUserStatusFilter;
+    const languageValue = user.language ?? "English";
+    const matchesLanguage = adminUserLanguageFilter === "ALL" || languageValue === adminUserLanguageFilter;
+    return matchesRole && matchesStatus && matchesLanguage;
+  });
   const adminFilteredEnrollments = enrollments.filter((row) => {
     const matchesStatus =
       adminEnrollmentStatusFilter === "ALL" || row.status === adminEnrollmentStatusFilter;
@@ -581,6 +615,44 @@ export function DashboardPage() {
       String(row.id).includes(search);
     return matchesStatus && matchesSearch;
   });
+  const asFilteredEnrollments = enrollments.filter((row) => {
+    const matchesStatus = asStatusFilter === "ALL" || row.status === asStatusFilter;
+    const search = asPremiseSearch.trim().toLowerCase();
+    const matchesSearch =
+      search.length === 0 ||
+      row.premise_id.toLowerCase().includes(search) ||
+      String(row.id).includes(search);
+    return matchesStatus && matchesSearch;
+  });
+  const esFilteredOffers = offers.filter((row) => {
+    const matchesStatus = esOfferFilter === "ALL" || row.status === esOfferFilter;
+    const search = esPremiseSearch.trim().toLowerCase();
+    const premise = row.premise_id?.toLowerCase() ?? "";
+    const matchesSearch =
+      search.length === 0 ||
+      premise.includes(search) ||
+      String(row.enrollment_id).includes(search) ||
+      String(row.id).includes(search);
+    return matchesStatus && matchesSearch;
+  });
+  const esFilteredEnrollments = enrollments.filter((row) => {
+    const matchesActive = esAssignmentFilter === "ALL" || row.status === "ASSIGNED";
+    const search = esPremiseSearch.trim().toLowerCase();
+    const matchesSearch =
+      search.length === 0 ||
+      row.premise_id.toLowerCase().includes(search) ||
+      String(row.id).includes(search);
+    return matchesActive && matchesSearch;
+  });
+  const nextAsAction =
+    asFilteredEnrollments.find((row) => row.status === "ASSIGNED" && row.es_current_enrollment_id === row.id) ??
+    asFilteredEnrollments.find((row) => row.status === "ASSIGNED") ??
+    asFilteredEnrollments.find((row) => row.status === "WAITING" && (row.pending_offer_count ?? 0) > 0) ??
+    null;
+  const nextEsExpiringOffer = esFilteredOffers
+    .filter((row) => row.status === "PENDING")
+    .map((row) => ({ row, expiresMs: new Date(row.expires_at).getTime() - Date.now() }))
+    .sort((a, b) => a.expiresMs - b.expiresMs)[0] ?? null;
   const statusCounts = users.reduce<Record<UserStatus, number>>(
     (counts, row) => {
       counts[row.status] += 1;
@@ -624,6 +696,16 @@ export function DashboardPage() {
             Dismiss
           </button>
         </div>
+      )}
+
+      {toasts.length > 0 && (
+        <section className="toast-stack" aria-live="polite" aria-atomic="true">
+          {toasts.map((toast) => (
+            <article key={toast.id} className={`toast-item ${toast.tone}`}>
+              {toast.message}
+            </article>
+          ))}
+        </section>
       )}
 
       {role === "ES" && currentEsProfile && (
@@ -717,6 +799,50 @@ export function DashboardPage() {
           <section className="card">
             <h2>User Management</h2>
             <p className="subtle">Update status and role assignments for dispatch operators.</p>
+            <div className="filter-row">
+              <label className="control-field">
+                <span>Role</span>
+                <select
+                  value={adminUserRoleFilter}
+                  onChange={(event) => setAdminUserRoleFilter(event.target.value as "ALL" | UserRole)}
+                >
+                  <option value="ALL">All</option>
+                  {USER_ROLES.map((userRole) => (
+                    <option key={userRole} value={userRole}>
+                      {userRole}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="control-field">
+                <span>Status</span>
+                <select
+                  value={adminUserStatusFilter}
+                  onChange={(event) => setAdminUserStatusFilter(event.target.value as "ALL" | UserStatus)}
+                >
+                  <option value="ALL">All</option>
+                  {USER_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="control-field">
+                <span>Language</span>
+                <select
+                  value={adminUserLanguageFilter}
+                  onChange={(event) => setAdminUserLanguageFilter(event.target.value as "ALL" | UserLanguage)}
+                >
+                  <option value="ALL">All</option>
+                  {USER_LANGUAGES.map((language) => (
+                    <option key={language} value={language}>
+                      {language}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <div className="table-wrap">
               <table className="admin-table">
                 <thead>
@@ -725,11 +851,12 @@ export function DashboardPage() {
                     <th>Name</th>
                     <th>Role</th>
                     <th>Status</th>
+                    <th>Language</th>
                     <th>Last Assigned</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
+                  {adminFilteredUsers.map((user) => (
                     <tr key={user.id}>
                       <td>{user.id}</td>
                       <td>{user.name}</td>
@@ -761,6 +888,7 @@ export function DashboardPage() {
                           ))}
                         </select>
                       </td>
+                      <td>{user.language ?? "-"}</td>
                       <td>{user.last_assigned_at ? new Date(user.last_assigned_at).toLocaleString() : "Never"}</td>
                     </tr>
                   ))}
@@ -849,12 +977,33 @@ export function DashboardPage() {
                       ageMinutes >= 30 ? "status-badge blocked" : ageMinutes >= 15 ? "status-badge queued" : "status-badge waiting";
                     return (
                       <tr key={row.id}>
-                        <td>{row.id}</td>
-                        <td>{row.premise_id}</td>
+                        <td>
+                          {row.id}
+                          <button type="button" className="copy-btn" onClick={() => copyText("Enrollment ID", row.id)}>
+                            Copy
+                          </button>
+                        </td>
+                        <td>
+                          {row.premise_id}
+                          <button type="button" className="copy-btn" onClick={() => copyText("Premise ID", row.premise_id)}>
+                            Copy
+                          </button>
+                        </td>
                         <td>{row.status}</td>
                         <td>{formatTimeslot(row.timeslot)}</td>
                         <td><span className={ageClass}>{ageMinutes}m</span></td>
-                        <td>{getEsDisplay(row)}</td>
+                        <td>
+                          {getEsDisplay(row)}
+                          {getEsDisplay(row) !== "-" && (
+                            <button
+                              type="button"
+                              className="copy-btn"
+                              onClick={() => copyText("ES name", getEsDisplay(row))}
+                            >
+                              Copy
+                            </button>
+                          )}
+                        </td>
                         <td>
                           <select
                             value={reofferTargetByEnrollment[row.id] ?? ""}
@@ -892,7 +1041,6 @@ export function DashboardPage() {
         </>
       )}
 
-      {actionSuccess && <p className="inline-success">{actionSuccess}</p>}
       {actionError && <p className="inline-error">{actionError}</p>}
 
       {role === "AS" && (
@@ -936,6 +1084,37 @@ export function DashboardPage() {
       {role === "AS" && state.data.enrollments && (
         <section className="card">
           <h2>My Enrollment Requests</h2>
+          <p className="subtle">Filter by status or premise and follow the guidance column for next action.</p>
+          <div className="filter-row">
+            <label className="control-field">
+              <span>Status</span>
+              <select
+                value={asStatusFilter}
+                onChange={(event) => setAsStatusFilter(
+                  event.target.value as "ALL" | "WAITING" | "ASSIGNED" | "COMPLETED"
+                )}
+              >
+                <option value="ALL">All</option>
+                <option value="WAITING">WAITING</option>
+                <option value="ASSIGNED">ASSIGNED</option>
+                <option value="COMPLETED">COMPLETED</option>
+              </select>
+            </label>
+            <label className="control-field">
+              <span>Search by ID/Premise</span>
+              <input
+                type="text"
+                value={asPremiseSearch}
+                onChange={(event) => setAsPremiseSearch(event.target.value)}
+                placeholder="e.g. TEST-PREMISE or 42"
+              />
+            </label>
+          </div>
+          {nextAsAction && (
+            <p className="next-action">
+              Next best action: {getAsGuidance(nextAsAction)}
+            </p>
+          )}
           <div className="table-wrap">
             <table className="admin-table">
               <thead>
@@ -950,13 +1129,34 @@ export function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {enrollments.map((row) => (
+                {asFilteredEnrollments.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.id}</td>
-                    <td>{row.premise_id}</td>
+                    <td>
+                      {row.id}
+                      <button type="button" className="copy-btn" onClick={() => copyText("Enrollment ID", row.id)}>
+                        Copy
+                      </button>
+                    </td>
+                    <td>
+                      {row.premise_id}
+                      <button type="button" className="copy-btn" onClick={() => copyText("Premise ID", row.premise_id)}>
+                        Copy
+                      </button>
+                    </td>
                     <td>{formatTimeslot(row.timeslot)}</td>
                     <td>{row.status}</td>
-                    <td>{getEsDisplay(row)}</td>
+                    <td>
+                      {getEsDisplay(row)}
+                      {getEsDisplay(row) !== "-" && (
+                        <button
+                          type="button"
+                          className="copy-btn"
+                          onClick={() => copyText("ES name", getEsDisplay(row))}
+                        >
+                          Copy
+                        </button>
+                      )}
+                    </td>
                     <td>
                       <span className={getEsWorkStatusBadgeClass(row)}>{getEsWorkStatus(row)}</span>
                     </td>
@@ -972,6 +1172,27 @@ export function DashboardPage() {
       {role === "ES" && state.data.enrollments && (
         <section className="card">
           <h2>My Assigned Enrollments</h2>
+          <div className="filter-row">
+            <label className="control-field">
+              <span>Assignment Filter</span>
+              <select
+                value={esAssignmentFilter}
+                onChange={(event) => setEsAssignmentFilter(event.target.value as "ALL" | "ACTIVE")}
+              >
+                <option value="ALL">All</option>
+                <option value="ACTIVE">Active only</option>
+              </select>
+            </label>
+            <label className="control-field">
+              <span>Search by ID/Premise</span>
+              <input
+                type="text"
+                value={esPremiseSearch}
+                onChange={(event) => setEsPremiseSearch(event.target.value)}
+                placeholder="e.g. TEST-PREMISE or 42"
+              />
+            </label>
+          </div>
           <div className="table-wrap">
             <table className="admin-table">
               <thead>
@@ -986,10 +1207,20 @@ export function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {enrollments.map((row) => (
+                {esFilteredEnrollments.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.id}</td>
-                    <td>{row.premise_id}</td>
+                    <td>
+                      {row.id}
+                      <button type="button" className="copy-btn" onClick={() => copyText("Enrollment ID", row.id)}>
+                        Copy
+                      </button>
+                    </td>
+                    <td>
+                      {row.premise_id}
+                      <button type="button" className="copy-btn" onClick={() => copyText("Premise ID", row.premise_id)}>
+                        Copy
+                      </button>
+                    </td>
                     <td>{formatTimeslot(row.timeslot)}</td>
                     <td>{row.status}</td>
                     <td>{row.requested_by_name ?? row.requested_by}</td>
@@ -1032,11 +1263,55 @@ export function DashboardPage() {
       {role !== "ADMIN" && state.data.offers && (
         <section className="card">
           <h2>{role === "ES" ? "My Offer Queue" : "Recent Offers"}</h2>
+          {role === "ES" && (
+            <>
+              <div className="filter-row">
+                <label className="control-field">
+                  <span>Offer Filter</span>
+                  <select
+                    value={esOfferFilter}
+                    onChange={(event) => setEsOfferFilter(event.target.value as "ALL" | "PENDING")}
+                  >
+                    <option value="ALL">All</option>
+                    <option value="PENDING">Pending only</option>
+                  </select>
+                </label>
+                <label className="control-field">
+                  <span>Search by ID/Premise</span>
+                  <input
+                    type="text"
+                    value={esPremiseSearch}
+                    onChange={(event) => setEsPremiseSearch(event.target.value)}
+                    placeholder="e.g. TEST-PREMISE or 42"
+                  />
+                </label>
+              </div>
+              {nextEsExpiringOffer && (
+                <p className="next-action">
+                  Next best action: You have 1 pending offer expiring soon (offer #{nextEsExpiringOffer.row.id}).
+                </p>
+              )}
+            </>
+          )}
           <ul className="record-list">
-            {offers.map((row) => (
+            {esFilteredOffers.map((row) => (
               <li key={String(row.id)}>
-                <span>#{String(row.id)}</span>
-                <span>Enrollment {String(row.enrollment_id ?? "-")}</span>
+                <span>
+                  #{String(row.id)}
+                  <button type="button" className="copy-btn" onClick={() => copyText("Offer ID", row.id)}>
+                    Copy
+                  </button>
+                </span>
+                <span>
+                  Enrollment {String(row.enrollment_id ?? "-")} ({row.premise_id ?? "No premise"})
+                  <button
+                    type="button"
+                    className="copy-btn"
+                    onClick={() => copyText("Premise ID", row.premise_id ?? null)}
+                  >
+                    Copy
+                  </button>
+                </span>
                 <span>{String(row.status ?? "-")}</span>
                 {role === "ES" && row.status === "PENDING" && (
                   <span className="offer-actions">

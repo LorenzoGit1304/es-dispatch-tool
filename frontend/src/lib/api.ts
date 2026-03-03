@@ -71,7 +71,7 @@ export const api = {
   getMyAssignedEnrollments: (getToken: TokenResolver) =>
     request<ClerkPaginatedList>("/enrollments/my/assigned?page=1&limit=20", getToken),
   getMyOffers: (getToken: TokenResolver) =>
-    request<ClerkPaginatedList>("/offers/my?page=1&limit=5", getToken),
+    request<ClerkPaginatedList>("/offers/my?page=1&limit=20", getToken),
   getCurrentUser: (getToken: TokenResolver) =>
     request<UserRow>("/users/me", getToken),
   getAuditLog: (getToken: TokenResolver) =>

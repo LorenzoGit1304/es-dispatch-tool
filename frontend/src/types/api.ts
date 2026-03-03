@@ -26,6 +26,7 @@ export type OfferStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
 export type OfferRow = {
   id: number;
   enrollment_id: number;
+  premise_id?: string;
   es_id: number;
   status: OfferStatus;
   offered_at: string;
