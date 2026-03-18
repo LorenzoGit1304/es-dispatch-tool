@@ -667,9 +667,36 @@ router.get("/", requireRole("ADMIN"), validate(enrollmentListQuerySchema, "query
 
     const dataParams = [...params, limit, offset];
     const result = await pool.query(
-      `SELECT * FROM enrollments
-       ${whereClause}
-       ORDER BY created_at DESC
+      `SELECT e.*,
+              requester.name AS requested_by_name,
+              assigned.name AS assigned_es_name,
+              assigned.current_enrollment_id AS es_current_enrollment_id,
+              current_work.premise_id AS es_current_premise_id,
+              latest_offer.es_id AS current_offer_es_id,
+              latest_offer.es_name AS current_offer_es_name,
+              latest_offer.offer_status AS current_offer_status,
+              offer_stats.offer_attempt_count,
+              offer_stats.pending_offer_count
+       FROM enrollments e
+       LEFT JOIN users requester ON requester.id = e.requested_by
+       LEFT JOIN users assigned ON assigned.id = e.assigned_es_id
+       LEFT JOIN enrollments current_work ON current_work.id = assigned.current_enrollment_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS offer_attempt_count,
+                COUNT(*) FILTER (WHERE o.status = 'PENDING')::int AS pending_offer_count
+         FROM enrollment_offers o
+         WHERE o.enrollment_id = e.id
+       ) offer_stats ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT o.es_id, u.name AS es_name, o.status AS offer_status
+         FROM enrollment_offers o
+         JOIN users u ON u.id = o.es_id
+         WHERE o.enrollment_id = e.id
+         ORDER BY o.offered_at DESC
+         LIMIT 1
+       ) latest_offer ON TRUE
+       ${whereClause.replace("status", "e.status")}
+       ORDER BY e.created_at DESC
        LIMIT $${dataParams.length - 1}
        OFFSET $${dataParams.length}`,
       dataParams

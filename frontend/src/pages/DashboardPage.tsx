@@ -52,6 +52,59 @@ const formatTimeslot = (value: string): string => {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 };
 
+const getAgeMinutes = (createdAt: string): number => {
+  return Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+};
+
+const getAdminRiskState = (
+  row: EnrollmentRow
+): { label: string; className: string; guidance: string; severity: number } | null => {
+  const ageMinutes = getAgeMinutes(row.created_at);
+
+  if (row.status === "WAITING" && row.current_offer_status === "REJECTED" && (row.pending_offer_count ?? 0) === 0) {
+    return {
+      label: "Uncovered",
+      className: "status-badge blocked",
+      guidance: "No pending offers remain. Re-offer to an assignable ES or schedule for another day.",
+      severity: 4,
+    };
+  }
+
+  if (row.status === "ASSIGNED" && row.assigned_es_id && !row.es_current_enrollment_id && ageMinutes >= 10) {
+    return {
+      label: "Needs Start",
+      className: "status-badge queued",
+      guidance: "An ES accepted this enrollment but has not marked it as current work yet.",
+      severity: 3,
+    };
+  }
+
+  if (
+    row.status === "ASSIGNED" &&
+    row.es_current_enrollment_id &&
+    row.es_current_enrollment_id !== row.id &&
+    ageMinutes >= 20
+  ) {
+    return {
+      label: "Queued Behind Work",
+      className: "status-badge waiting",
+      guidance: `Assigned ES is still working enrollment #${row.es_current_enrollment_id}. Monitor for delay or re-balance if needed.`,
+      severity: 2,
+    };
+  }
+
+  if (row.status === "WAITING" && ageMinutes >= 15) {
+    return {
+      label: "Aging Queue",
+      className: ageMinutes >= 30 ? "status-badge blocked" : "status-badge queued",
+      guidance: "This request has been waiting longer than expected. Review its offer path.",
+      severity: ageMinutes >= 30 ? 3 : 2,
+    };
+  }
+
+  return null;
+};
+
 const getAsGuidance = (row: EnrollmentRow): string => {
   const assignedEs = row.assigned_es_name ?? (row.assigned_es_id ? `ES #${row.assigned_es_id}` : null);
   const offeredEs = row.current_offer_es_name ?? (row.current_offer_es_id ? `ES #${row.current_offer_es_id}` : null);
@@ -411,6 +464,14 @@ export function DashboardPage() {
     );
   };
 
+  const requestUserStatusRecovery = (userId: number, name: string, status: UserStatus) => {
+    openConfirm(
+      "Confirm Status Recovery",
+      `Set ${name} to ${status}? Use this only when you know their current status is stale.`,
+      () => onUserStatusChange(userId, status)
+    );
+  };
+
   const onMyStatusChange = async (status: UserStatus) => {
     if (!syncState.user) {
       return;
@@ -598,6 +659,9 @@ export function DashboardPage() {
   const adminEsUsers = users.filter(
     (user) => user.role === "ES" && (user.status === "AVAILABLE" || user.status === "BUSY")
   );
+  const suspiciousBusyEsUsers = users.filter(
+    (user) => user.role === "ES" && user.status === "BUSY" && !user.current_enrollment_id
+  );
   const adminFilteredUsers = users.filter((user) => {
     const matchesRole = adminUserRoleFilter === "ALL" || user.role === adminUserRoleFilter;
     const matchesStatus = adminUserStatusFilter === "ALL" || user.status === adminUserStatusFilter;
@@ -615,6 +679,26 @@ export function DashboardPage() {
       String(row.id).includes(search);
     return matchesStatus && matchesSearch;
   });
+  const adminRecoveryRows = adminFilteredEnrollments
+    .map((row) => ({
+      row,
+      risk: getAdminRiskState(row),
+      ageMinutes: getAgeMinutes(row.created_at),
+    }))
+    .filter((entry) => entry.risk !== null)
+    .sort((left, right) => {
+      return (right.risk?.severity ?? 0) - (left.risk?.severity ?? 0) || right.ageMinutes - left.ageMinutes;
+    });
+  const uncoveredCount = enrollments.filter(
+    (row) => row.status === "WAITING" && row.current_offer_status === "REJECTED" && (row.pending_offer_count ?? 0) === 0
+  ).length;
+  const agingQueueCount = enrollments.filter(
+    (row) => row.status === "WAITING" && getAgeMinutes(row.created_at) >= 15
+  ).length;
+  const needsStartCount = enrollments.filter(
+    (row) => row.status === "ASSIGNED" && !!row.assigned_es_id && !row.es_current_enrollment_id && getAgeMinutes(row.created_at) >= 10
+  ).length;
+  const adminNextAction = adminRecoveryRows[0] ?? null;
   const asFilteredEnrollments = enrollments.filter((row) => {
     const matchesStatus = asStatusFilter === "ALL" || row.status === asStatusFilter;
     const search = asPremiseSearch.trim().toLowerCase();
@@ -793,6 +877,146 @@ export function DashboardPage() {
                 <span>Recent Audit Events</span>
                 <strong>{auditLog.length}</strong>
               </div>
+              <div className="maintenance-stat">
+                <span>Aging Waiting Queue</span>
+                <strong>{agingQueueCount}</strong>
+              </div>
+              <div className="maintenance-stat">
+                <span>Uncovered Requests</span>
+                <strong>{uncoveredCount}</strong>
+              </div>
+              <div className="maintenance-stat">
+                <span>Assigned But Not Started</span>
+                <strong>{needsStartCount}</strong>
+              </div>
+              <div className="maintenance-stat">
+                <span>Stuck Busy ES</span>
+                <strong>{suspiciousBusyEsUsers.length}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Operations Health</h2>
+            <p className="subtle">This section highlights issues that commonly need admin intervention during live dispatch.</p>
+            {adminNextAction ? (
+              <p className="next-action">
+                Next best action: Enrollment #{adminNextAction.row.id} is {adminNextAction.risk?.label.toLowerCase()}. {adminNextAction.risk?.guidance}
+              </p>
+            ) : (
+              <p className="subtle">No active admin intervention signals right now.</p>
+            )}
+            <div className="health-grid">
+              <article className="health-card">
+                <h3>Queue Risks</h3>
+                <p className="subtle">Requests needing attention because of age, rejection, or delayed ES pickup.</p>
+                <div className="health-list">
+                  <span className="status-badge queued">Aging queue: {agingQueueCount}</span>
+                  <span className="status-badge blocked">Uncovered: {uncoveredCount}</span>
+                  <span className="status-badge waiting">Needs start: {needsStartCount}</span>
+                </div>
+              </article>
+              <article className="health-card">
+                <h3>Recovery Signals</h3>
+                <p className="subtle">Operators that may need manual status recovery to keep routing healthy.</p>
+                <div className="health-list">
+                  <span className={suspiciousBusyEsUsers.length > 0 ? "status-badge blocked" : "status-badge complete"}>
+                    Busy without active enrollment: {suspiciousBusyEsUsers.length}
+                  </span>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Recovery Queue</h2>
+            <p className="subtle">Use this board to resolve dispatch situations that are likely to stall operations.</p>
+            <div className="table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Enrollment</th>
+                    <th>Risk</th>
+                    <th>Age</th>
+                    <th>Assigned / Offered ES</th>
+                    <th>Guidance</th>
+                    <th>Recover</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminRecoveryRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="subtle">No flagged enrollments right now.</td>
+                    </tr>
+                  ) : (
+                    adminRecoveryRows.map(({ row, risk, ageMinutes }) => (
+                      <tr key={row.id}>
+                        <td>
+                          #{row.id} / {row.premise_id}
+                          <button type="button" className="copy-btn" onClick={() => copyText("Premise ID", row.premise_id)}>
+                            Copy
+                          </button>
+                        </td>
+                        <td><span className={risk?.className}>{risk?.label}</span></td>
+                        <td>{ageMinutes}m</td>
+                        <td>{getEsDisplay(row)}</td>
+                        <td className="prompt-note">{risk?.guidance}</td>
+                        <td>
+                          {row.status === "WAITING" ? (
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={() => {
+                                const fallbackEs = adminEsUsers[0];
+                                if (fallbackEs) {
+                                  setReofferTargetByEnrollment((prev) => ({
+                                    ...prev,
+                                    [row.id]: String(fallbackEs.id),
+                                  }));
+                                  pushToast("info", `Preselected ${fallbackEs.name} for enrollment #${row.id}.`);
+                                } else {
+                                  pushToast("error", "No assignable ES available for quick recovery.");
+                                }
+                              }}
+                            >
+                              Prep Re-offer
+                            </button>
+                          ) : (
+                            <span className="subtle">Monitor ES progress</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>ES Recovery Tools</h2>
+            <p className="subtle">If an ES is stuck in BUSY without an active assignment, you can safely return them to AVAILABLE.</p>
+            <div className="recovery-user-list">
+              {suspiciousBusyEsUsers.length === 0 ? (
+                <p className="subtle">No ES users currently look stuck.</p>
+              ) : (
+                suspiciousBusyEsUsers.map((user) => (
+                  <article key={user.id} className="recovery-user-card">
+                    <div>
+                      <strong>{user.name}</strong>
+                      <p className="subtle">ES #{user.id} is BUSY but has no `current_enrollment_id`.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => requestUserStatusRecovery(user.id, user.name, "AVAILABLE")}
+                      disabled={activeUserAction === user.id}
+                    >
+                      Mark Available
+                    </button>
+                  </article>
+                ))
+              )}
             </div>
           </section>
 

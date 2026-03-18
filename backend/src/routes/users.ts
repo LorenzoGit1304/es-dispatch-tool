@@ -172,7 +172,7 @@ router.get("/", requireRole("ADMIN"), validate(paginationQuerySchema, "query"), 
     const total = countResult.rows[0]?.total ?? 0;
 
     const result = await pool.query(
-      `SELECT id, name, role, status, language, last_assigned_at
+      `SELECT id, name, role, status, language, last_assigned_at, current_enrollment_id
        FROM users
        ORDER BY id
        LIMIT $1 OFFSET $2`,

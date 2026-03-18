@@ -265,6 +265,32 @@ body {
   color: var(--accent);
 }
 
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.9rem;
+}
+
+.health-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: rgba(232, 232, 239, 0.45);
+}
+
+.health-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.96rem;
+}
+
+.health-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -488,6 +514,22 @@ body {
   margin-top: 0.95rem;
 }
 
+.recovery-user-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.recovery-user-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: rgba(246, 246, 247, 0.8);
+}
+
 .status-message {
   min-height: 100vh;
   margin: 0;
@@ -534,6 +576,11 @@ body {
   }
 
   .session-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .recovery-user-card {
     flex-direction: column;
     align-items: stretch;
   }

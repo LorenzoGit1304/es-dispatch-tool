@@ -18,6 +18,7 @@ export type UserRow = {
   role: UserRole;
   status: UserStatus;
   last_assigned_at: string | null;
+  current_enrollment_id?: number | null;
   language?: UserLanguage | null;
 };
 

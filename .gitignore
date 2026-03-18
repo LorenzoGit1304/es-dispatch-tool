@@ -9,6 +9,12 @@ frontend/node_modules/
 dist/
 backend/dist/
 frontend/dist/
+backend/src/**/*.js
+backend/src/**/*.js.map
+backend/src/**/*.d.ts
+backend/src/**/*.d.ts.map
+
+.vscode/
 
 backend/backups/
 
