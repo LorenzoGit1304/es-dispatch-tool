@@ -6,10 +6,10 @@ type NotificationSound =
   | "as_completed";
 
 let audioContext: AudioContext | null = null;
-let notificationVolume = 0.65;
+let notificationVolume = 0.8;
 
 export const setNotificationVolume = (value: number) => {
-  notificationVolume = Math.max(0, Math.min(1, value));
+  notificationVolume = Math.max(0, Math.min(1, value * 1.15));
 };
 
 const getAudioContext = (): AudioContext | null => {
@@ -84,8 +84,8 @@ export const playNotificationSound = async (sound: NotificationSound) => {
 
   switch (sound) {
     case "es_new_offer":
-      // 5+ second alert with moderate volume to catch attention without being aggressive.
-      playRepeatingPattern(context, [740, 620, 740, 880], 5200, 650, 230, 0.16);
+      // 5+ second alert tuned to be more noticeable for ES operators.
+      playRepeatingPattern(context, [740, 620, 740, 880], 5400, 600, 260, 0.26);
       break;
     case "as_offer_accepted":
       playRepeatingPattern(context, [660, 880], 900, 300, 160, 0.13);

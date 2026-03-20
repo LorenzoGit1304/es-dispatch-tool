@@ -205,14 +205,15 @@ export function DashboardPage() {
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [soundVolume, setSoundVolume] = useState<number>(() => {
     if (typeof window === "undefined") {
-      return 65;
+      return 85;
     }
     const stored = Number(window.localStorage.getItem("dispatch_sound_volume"));
-    return Number.isFinite(stored) ? Math.max(0, Math.min(100, stored)) : 65;
+    return Number.isFinite(stored) ? Math.max(0, Math.min(100, stored)) : 85;
   });
   const [requestForm, setRequestForm] = useState({
     premiseId: "",
     timeslot: "",
+    language: "English" as UserLanguage,
   });
   const [sessionWarning, setSessionWarning] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
@@ -268,6 +269,25 @@ export function DashboardPage() {
     setConfirmState({ title, message, onConfirm });
   };
 
+  const showBrowserNotification = (title: string, body: string) => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return;
+    }
+
+    if (Notification.permission !== "granted") {
+      return;
+    }
+
+    const notification = new Notification(title, {
+      body,
+      tag: "es-dispatch-new-offer",
+    });
+
+    window.setTimeout(() => {
+      notification.close();
+    }, 8000);
+  };
+
   const loadDashboard = useCallback(async (role: UserRole, options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false;
     if (!silent) {
@@ -314,6 +334,20 @@ export function DashboardPage() {
       setSessionWarning("Session invalidated in the background. Please sign in again.");
     }
   }, [isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return;
+    }
+
+    if (syncState.loading || syncState.error || syncState.user?.role !== "ES") {
+      return;
+    }
+
+    if (Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, [syncState.error, syncState.loading, syncState.user]);
 
   useEffect(() => {
     if (syncState.loading || syncState.error || !syncState.user) {
@@ -367,6 +401,15 @@ export function DashboardPage() {
 
     playNotificationSound("es_new_offer").catch(() => {});
     pushToast("info", "New enrollment request received. Please review your offer queue.");
+    const newestPendingOffer = currentOffers.find(
+      (offer) => offer.status === "PENDING" && !previousPendingIds.has(offer.id)
+    );
+    if (newestPendingOffer) {
+      showBrowserNotification(
+        "New ES Enrollment Request",
+        `Offer #${newestPendingOffer.id} for enrollment #${newestPendingOffer.enrollment_id} is waiting for your response.`
+      );
+    }
   }, [pushToast, soundVolume, state.data]);
 
   useEffect(() => {
@@ -541,8 +584,8 @@ export function DashboardPage() {
 
     const premiseId = requestForm.premiseId.trim();
     const selectedTimeslot = requestForm.timeslot.trim();
-    if (!premiseId || !selectedTimeslot) {
-      setActionError("Premise ID and timeslot are required.");
+    if (!premiseId || !selectedTimeslot || !requestForm.language) {
+      setActionError("Premise ID, timeslot, and language are required.");
       return;
     }
 
@@ -552,8 +595,9 @@ export function DashboardPage() {
       await api.createTransferRequest(getToken, {
         premise_id: premiseId,
         timeslot: selectedTimeslot,
+        language: requestForm.language,
       });
-      setRequestForm({ premiseId: "", timeslot: "" });
+      setRequestForm({ premiseId: "", timeslot: "", language: "English" });
       pushToast("success", "Transfer request created.");
       await loadDashboard(syncState.user.role);
     } catch (error: unknown) {
@@ -719,6 +763,16 @@ export function DashboardPage() {
       String(row.id).includes(search);
     return matchesStatus && matchesSearch;
   });
+  const esPrioritizedOffers = [...esFilteredOffers].sort((left, right) => {
+    const leftPending = left.status === "PENDING" ? 1 : 0;
+    const rightPending = right.status === "PENDING" ? 1 : 0;
+
+    if (leftPending !== rightPending) {
+      return rightPending - leftPending;
+    }
+
+    return new Date(right.offered_at).getTime() - new Date(left.offered_at).getTime();
+  });
   const esFilteredEnrollments = enrollments.filter((row) => {
     const matchesActive = esAssignmentFilter === "ALL" || row.status === "ASSIGNED";
     const search = esPremiseSearch.trim().toLowerCase();
@@ -737,6 +791,7 @@ export function DashboardPage() {
     .filter((row) => row.status === "PENDING")
     .map((row) => ({ row, expiresMs: new Date(row.expires_at).getTime() - Date.now() }))
     .sort((a, b) => a.expiresMs - b.expiresMs)[0] ?? null;
+  const newestPendingEsOffer = esPrioritizedOffers.find((row) => row.status === "PENDING") ?? null;
   const statusCounts = users.reduce<Record<UserStatus, number>>(
     (counts, row) => {
       counts[row.status] += 1;
@@ -1183,6 +1238,7 @@ export function DashboardPage() {
                   <tr>
                     <th>ID</th>
                     <th>Premise</th>
+                    <th>Language</th>
                     <th>Status</th>
                     <th>Timeslot</th>
                     <th>Age</th>
@@ -1213,6 +1269,7 @@ export function DashboardPage() {
                             Copy
                           </button>
                         </td>
+                        <td>{row.language}</td>
                         <td>{row.status}</td>
                         <td>{formatTimeslot(row.timeslot)}</td>
                         <td><span className={ageClass}>{ageMinutes}m</span></td>
@@ -1270,7 +1327,7 @@ export function DashboardPage() {
       {role === "AS" && (
         <section className="card">
           <h2>Create Transfer Request</h2>
-          <p className="subtle">Submit a premise and appointment slot to dispatch to available ES users.</p>
+          <p className="subtle">Submit a premise, language, and appointment slot so dispatch routes it to the correct ES language group.</p>
           <div className="request-form">
             <label className="control-field">
               <span>Premise ID</span>
@@ -1280,6 +1337,20 @@ export function DashboardPage() {
                 onChange={(event) => setRequestForm((prev) => ({ ...prev, premiseId: event.target.value }))}
                 placeholder="TEST-PREMISE-001"
               />
+            </label>
+            <label className="control-field">
+              <span>Customer Language</span>
+              <select
+                value={requestForm.language}
+                onChange={(event) => setRequestForm((prev) => ({
+                  ...prev,
+                  language: event.target.value as UserLanguage,
+                }))}
+              >
+                {USER_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>{language}</option>
+                ))}
+              </select>
             </label>
             <label className="control-field">
               <span>Timeslot</span>
@@ -1345,6 +1416,7 @@ export function DashboardPage() {
                 <tr>
                   <th>ID</th>
                   <th>Premise</th>
+                  <th>Language</th>
                   <th>Timeslot</th>
                   <th>Status</th>
                   <th>Assigned / Offered ES</th>
@@ -1367,6 +1439,7 @@ export function DashboardPage() {
                         Copy
                       </button>
                     </td>
+                    <td>{row.language}</td>
                     <td>{formatTimeslot(row.timeslot)}</td>
                     <td>{row.status}</td>
                     <td>
@@ -1390,6 +1463,102 @@ export function DashboardPage() {
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {role === "ES" && state.data.offers && (
+        <section className="card">
+          <h2>My Offer Queue</h2>
+          {newestPendingEsOffer && (
+            <div className="offer-alert-banner" role="alert">
+              <div>
+                <p className="eyebrow">New Request</p>
+                <strong>
+                  Offer #{newestPendingEsOffer.id} for enrollment #{newestPendingEsOffer.enrollment_id}
+                </strong>
+                    <p className="subtle">
+                      Premise: {newestPendingEsOffer.premise_id ?? "No premise"}.
+                      Review this first before older items in the queue.
+                    </p>
+                  </div>
+              <span className="status-badge blocked">Pending Now</span>
+            </div>
+          )}
+          <div className="filter-row">
+            <label className="control-field">
+              <span>Offer Filter</span>
+              <select
+                value={esOfferFilter}
+                onChange={(event) => setEsOfferFilter(event.target.value as "ALL" | "PENDING")}
+              >
+                <option value="ALL">All</option>
+                <option value="PENDING">Pending only</option>
+              </select>
+            </label>
+            <label className="control-field">
+              <span>Search by ID/Premise</span>
+              <input
+                type="text"
+                value={esPremiseSearch}
+                onChange={(event) => setEsPremiseSearch(event.target.value)}
+                placeholder="e.g. TEST-PREMISE or 42"
+              />
+            </label>
+          </div>
+          {nextEsExpiringOffer && (
+            <p className="next-action">
+              Next best action: You have 1 pending offer expiring soon (offer #{nextEsExpiringOffer.row.id}).
+            </p>
+          )}
+          <ul className="record-list">
+            {esPrioritizedOffers.map((row, index) => (
+              <li
+                key={String(row.id)}
+                className={[
+                  row.status === "PENDING" ? "record-item-pending" : "",
+                  row.status === "PENDING" && index === 0 ? "record-item-fresh" : "",
+                ].filter(Boolean).join(" ")}
+              >
+                <span>
+                  #{String(row.id)}
+                  <button type="button" className="copy-btn" onClick={() => copyText("Offer ID", row.id)}>
+                    Copy
+                  </button>
+                </span>
+                <span>
+                  Enrollment {String(row.enrollment_id ?? "-")} ({row.premise_id ?? "No premise"})
+                  <button
+                    type="button"
+                    className="copy-btn"
+                    onClick={() => copyText("Premise ID", row.premise_id ?? null)}
+                  >
+                    Copy
+                  </button>
+                </span>
+                <span>{String(row.status ?? "-")}</span>
+                {row.status === "PENDING" && (
+                  <span className="offer-actions">
+                    <button
+                      type="button"
+                      className="btn-primary"
+                          onClick={() => onOfferAction(row.id, "accept")}
+                          disabled={activeOfferAction === row.id}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      onClick={() => requestOfferReject(row.id)}
+                      disabled={activeOfferAction === row.id}
+                    >
+                      Reject
+                    </button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -1423,6 +1592,7 @@ export function DashboardPage() {
                 <tr>
                   <th>ID</th>
                   <th>Premise</th>
+                  <th>Language</th>
                   <th>Timeslot</th>
                   <th>Status</th>
                   <th>Requested By</th>
@@ -1445,6 +1615,7 @@ export function DashboardPage() {
                         Copy
                       </button>
                     </td>
+                    <td>{row.language}</td>
                     <td>{formatTimeslot(row.timeslot)}</td>
                     <td>{row.status}</td>
                     <td>{row.requested_by_name ?? row.requested_by}</td>
@@ -1481,85 +1652,6 @@ export function DashboardPage() {
               </tbody>
             </table>
           </div>
-        </section>
-      )}
-
-      {role !== "ADMIN" && state.data.offers && (
-        <section className="card">
-          <h2>{role === "ES" ? "My Offer Queue" : "Recent Offers"}</h2>
-          {role === "ES" && (
-            <>
-              <div className="filter-row">
-                <label className="control-field">
-                  <span>Offer Filter</span>
-                  <select
-                    value={esOfferFilter}
-                    onChange={(event) => setEsOfferFilter(event.target.value as "ALL" | "PENDING")}
-                  >
-                    <option value="ALL">All</option>
-                    <option value="PENDING">Pending only</option>
-                  </select>
-                </label>
-                <label className="control-field">
-                  <span>Search by ID/Premise</span>
-                  <input
-                    type="text"
-                    value={esPremiseSearch}
-                    onChange={(event) => setEsPremiseSearch(event.target.value)}
-                    placeholder="e.g. TEST-PREMISE or 42"
-                  />
-                </label>
-              </div>
-              {nextEsExpiringOffer && (
-                <p className="next-action">
-                  Next best action: You have 1 pending offer expiring soon (offer #{nextEsExpiringOffer.row.id}).
-                </p>
-              )}
-            </>
-          )}
-          <ul className="record-list">
-            {esFilteredOffers.map((row) => (
-              <li key={String(row.id)}>
-                <span>
-                  #{String(row.id)}
-                  <button type="button" className="copy-btn" onClick={() => copyText("Offer ID", row.id)}>
-                    Copy
-                  </button>
-                </span>
-                <span>
-                  Enrollment {String(row.enrollment_id ?? "-")} ({row.premise_id ?? "No premise"})
-                  <button
-                    type="button"
-                    className="copy-btn"
-                    onClick={() => copyText("Premise ID", row.premise_id ?? null)}
-                  >
-                    Copy
-                  </button>
-                </span>
-                <span>{String(row.status ?? "-")}</span>
-                {role === "ES" && row.status === "PENDING" && (
-                  <span className="offer-actions">
-                    <button
-                      type="button"
-                      className="btn-primary"
-                          onClick={() => onOfferAction(row.id, "accept")}
-                          disabled={activeOfferAction === row.id}
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-danger"
-                      onClick={() => requestOfferReject(row.id)}
-                      disabled={activeOfferAction === row.id}
-                    >
-                      Reject
-                    </button>
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
         </section>
       )}
 

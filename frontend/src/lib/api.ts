@@ -106,7 +106,7 @@ export const api = {
     }),
   createTransferRequest: (
     getToken: TokenResolver,
-    payload: { premise_id: string; timeslot: string }
+    payload: { premise_id: string; timeslot: string; language: UserLanguage }
   ) =>
     request<{
       enrollment: EnrollmentRow;

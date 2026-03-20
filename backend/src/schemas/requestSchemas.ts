@@ -9,11 +9,13 @@ export const enrollmentCreateSchema = z.object({
   premise_id: z.string().min(1),
   requested_by: z.number().int().positive(),
   timeslot: z.string().min(1),
+  language: languageSchema,
 });
 
 export const asEnrollmentRequestSchema = z.object({
   premise_id: z.string().min(1),
   timeslot: z.string().min(1),
+  language: languageSchema,
 });
 
 export const enrollmentReofferSchema = z.object({

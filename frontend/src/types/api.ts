@@ -43,6 +43,7 @@ export type EnrollmentRow = {
   requested_by: number;
   timeslot: string;
   status: EnrollmentStatus;
+  language: UserLanguage;
   created_at: string;
   assigned_es_id: number | null;
   assigned_es_name?: string | null;

@@ -12,56 +12,42 @@ import { apiError } from "../utils/apiError";
 import { getActorUserId, logAuditEvent } from "../utils/auditLog";
 import { requireRole } from "../middleware/requireRole";
 import { getAuthenticatedClerkId, getAuthenticatedDbUser } from "../utils/authenticatedUser";
+import { DispatchLanguage, findAssignableEs } from "../utils/dispatchSelection";
 
 const router = Router();
 
 const createEnrollmentAndDispatch = async (
   premiseId: string,
   requestedBy: number,
-  timeslot: string
+  timeslot: string,
+  language: DispatchLanguage
 ) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     const enrollmentResult = await client.query(
-      `INSERT INTO enrollments (premise_id, requested_by, timeslot)
-       VALUES ($1, $2, $3)
+      `INSERT INTO enrollments (premise_id, requested_by, timeslot, language)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [premiseId, requestedBy, timeslot]
+      [premiseId, requestedBy, timeslot, language]
     );
 
     const enrollment = enrollmentResult.rows[0];
 
-    let esResult = await client.query(
-      `SELECT * FROM users
-       WHERE role = 'ES'
-         AND status = 'AVAILABLE'
-       ORDER BY last_assigned_at ASC NULLS FIRST
-       LIMIT 1`
-    );
-
-    let selectedES;
+    let selectedES = await findAssignableEs(client, language, "AVAILABLE");
     let queuedForBusy = false;
 
-    if (esResult.rows.length === 0) {
-      esResult = await client.query(
-        `SELECT * FROM users
-         WHERE role = 'ES'
-           AND status = 'BUSY'
-         ORDER BY last_assigned_at ASC NULLS FIRST
-         LIMIT 1`
-      );
+    if (!selectedES) {
+      selectedES = await findAssignableEs(client, language, "BUSY");
 
-      if (esResult.rows.length === 0) {
+      if (!selectedES) {
         await client.query("ROLLBACK");
         return { error: "NO_ES_AVAILABLE" as const };
       }
 
       queuedForBusy = true;
     }
-
-    selectedES = esResult.rows[0];
 
     const offerResult = await client.query(
       `INSERT INTO enrollment_offers
@@ -95,11 +81,11 @@ const createEnrollmentAndDispatch = async (
    CREATE ENROLLMENT + DISPATCH OFFER (ADMIN)
 ====================================================== */
 router.post("/", requireRole("ADMIN"), validate(enrollmentCreateSchema), async (req, res) => {
-  const { premise_id, requested_by, timeslot } = req.body;
+  const { premise_id, requested_by, timeslot, language } = req.body;
   const actorClerkId = getAuthenticatedClerkId(req);
 
   try {
-    const creation = await createEnrollmentAndDispatch(premise_id, requested_by, timeslot);
+    const creation = await createEnrollmentAndDispatch(premise_id, requested_by, timeslot, language);
     if ("error" in creation) {
       return apiError(res, 400, "No ES available for assignment", "NO_ES_AVAILABLE");
     }
@@ -115,6 +101,7 @@ router.post("/", requireRole("ADMIN"), validate(enrollmentCreateSchema), async (
       metadata: {
         offerId: offer.id,
         offeredToEsId: selectedES.id,
+        language,
         queuedForBusy,
       },
     });
@@ -141,10 +128,10 @@ router.post("/request", requireRole("AS"), validate(asEnrollmentRequestSchema), 
     return apiError(res, 403, "User not registered in system", "USER_NOT_REGISTERED");
   }
 
-  const { premise_id, timeslot } = req.body;
+  const { premise_id, timeslot, language } = req.body;
 
   try {
-    const creation = await createEnrollmentAndDispatch(premise_id, currentUser.id, timeslot);
+    const creation = await createEnrollmentAndDispatch(premise_id, currentUser.id, timeslot, language);
     if ("error" in creation) {
       return apiError(res, 400, "No ES available for assignment", "NO_ES_AVAILABLE");
     }
@@ -160,6 +147,7 @@ router.post("/request", requireRole("AS"), validate(asEnrollmentRequestSchema), 
       metadata: {
         offerId: offer.id,
         offeredToEsId: selectedES.id,
+        language,
         queuedForBusy,
       },
     });
@@ -497,7 +485,7 @@ router.post(
       }
 
       const targetEsResult = await client.query(
-        `SELECT id, name, role, status
+        `SELECT id, name, role, status, language
          FROM users
          WHERE id = $1
          FOR UPDATE`,
@@ -520,6 +508,15 @@ router.post(
           400,
           "Target ES must be AVAILABLE or BUSY",
           "TARGET_ES_NOT_ASSIGNABLE"
+        );
+      }
+      if (targetEs.language !== enrollment.language) {
+        await client.query("ROLLBACK");
+        return apiError(
+          res,
+          400,
+          "Target ES language does not match enrollment language",
+          "TARGET_ES_LANGUAGE_MISMATCH"
         );
       }
 

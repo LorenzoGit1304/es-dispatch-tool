@@ -6,6 +6,7 @@ import { idParamSchema, paginationQuerySchema } from "../schemas/requestSchemas"
 import { getActorUserId, logAuditEvent } from "../utils/auditLog";
 import { requireRole } from "../middleware/requireRole";
 import { getAuthenticatedClerkId, getAuthenticatedDbUser } from "../utils/authenticatedUser";
+import { DispatchLanguage, findAssignableEs } from "../utils/dispatchSelection";
 
 const router = Router();
 
@@ -128,7 +129,9 @@ router.post("/:id/reject", requireRole("ES", "ADMIN"), async (req, res) => {
     await client.query("BEGIN");
 
     const offerResult = await client.query(
-      `SELECT * FROM enrollment_offers
+      `SELECT o.*, e.language AS enrollment_language
+       FROM enrollment_offers o
+       JOIN enrollments e ON e.id = o.enrollment_id
        WHERE id = $1
        FOR UPDATE`,
       [id]
@@ -158,23 +161,17 @@ router.post("/:id/reject", requireRole("ES", "ADMIN"), async (req, res) => {
       [id]
     );
 
-    const nextESResult = await client.query(
-      `SELECT *
-       FROM users
-       WHERE role = 'ES'
-         AND status = 'AVAILABLE'
-         AND id != $1
-       ORDER BY last_assigned_at ASC NULLS FIRST
-       LIMIT 1`,
-      [offer.es_id]
+    const nextES = await findAssignableEs(
+      client,
+      offer.enrollment_language as DispatchLanguage,
+      "AVAILABLE",
+      offer.es_id
     );
 
-    if (nextESResult.rows.length === 0) {
+    if (!nextES) {
       await client.query("COMMIT");
       return apiError(res, 400, "No other available ES", "NO_OTHER_ES_AVAILABLE");
     }
-
-    const nextES = nextESResult.rows[0];
 
     const newOfferResult = await client.query(
       `INSERT INTO enrollment_offers

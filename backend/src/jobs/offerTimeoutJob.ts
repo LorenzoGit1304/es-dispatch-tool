@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import pool from "../config/db";
+import { DispatchLanguage, findAssignableEs } from "../utils/dispatchSelection";
 
 cron.schedule("*/15 * * * * *", async () => {
   const client = await pool.connect();
@@ -20,11 +21,13 @@ cron.schedule("*/15 * * * * *", async () => {
 
       // 2️⃣ Atomically expire offer (race-safe)
       const expireResult = await client.query(
-        `UPDATE enrollment_offers
+        `UPDATE enrollment_offers o
          SET status = 'EXPIRED'
-         WHERE id = $1
-           AND status = 'PENDING'
-         RETURNING *`,
+         FROM enrollments e
+         WHERE o.id = $1
+           AND o.status = 'PENDING'
+           AND e.id = o.enrollment_id
+         RETURNING o.*, e.language AS enrollment_language`,
         [row.id]
       );
 
@@ -43,32 +46,26 @@ cron.schedule("*/15 * * * * *", async () => {
       );
 
       // 4️⃣ Try AVAILABLE first
-      let nextESResult = await client.query(
-        `SELECT *
-         FROM users
-         WHERE role = 'ES'
-           AND status = 'AVAILABLE'
-         ORDER BY last_assigned_at ASC NULLS FIRST
-         LIMIT 1`
+      let nextES = await findAssignableEs(
+        client,
+        expiredOffer.enrollment_language as DispatchLanguage,
+        "AVAILABLE",
+        expiredOffer.es_id
       );
 
       // 5️⃣ If none AVAILABLE → fallback to BUSY
-      if (nextESResult.rows.length === 0) {
-        nextESResult = await client.query(
-          `SELECT *
-           FROM users
-           WHERE role = 'ES'
-             AND status = 'BUSY'
-           ORDER BY last_assigned_at ASC NULLS FIRST
-           LIMIT 1`
+      if (!nextES) {
+        nextES = await findAssignableEs(
+          client,
+          expiredOffer.enrollment_language as DispatchLanguage,
+          "BUSY",
+          expiredOffer.es_id
         );
       }
 
-      if (nextESResult.rows.length === 0) {
+      if (!nextES) {
         continue; // no ES left in system
       }
-
-      const nextES = nextESResult.rows[0];
 
       // 6️⃣ Create new offer
       await client.query(

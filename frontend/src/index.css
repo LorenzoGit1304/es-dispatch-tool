@@ -241,6 +241,20 @@ body {
   border-bottom: 0;
 }
 
+.record-list li.record-item-pending {
+  background: rgba(181, 160, 122, 0.12);
+  border: 1px solid rgba(181, 160, 122, 0.34);
+  border-radius: 12px;
+  margin-bottom: 0.55rem;
+  padding: 0.75rem;
+}
+
+.record-list li.record-item-fresh {
+  background: rgba(34, 81, 139, 0.12);
+  border-color: rgba(34, 81, 139, 0.38);
+  box-shadow: 0 0 0 2px rgba(34, 81, 139, 0.1);
+}
+
 .maintenance-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -263,6 +277,21 @@ body {
 .maintenance-stat strong {
   font-size: 1.25rem;
   color: var(--accent);
+}
+
+.offer-alert-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 0.9rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(34, 81, 139, 0.32);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(34, 81, 139, 0.12), rgba(181, 160, 122, 0.14)),
+    var(--bright-snow);
+  box-shadow: 0 10px 28px rgba(34, 81, 139, 0.12);
 }
 
 .health-grid {
@@ -576,6 +605,11 @@ body {
   }
 
   .session-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .offer-alert-banner {
     flex-direction: column;
     align-items: stretch;
   }
