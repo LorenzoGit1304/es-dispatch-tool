@@ -187,6 +187,19 @@ const getEsDisplay = (row: EnrollmentRow): string => {
   return "-";
 };
 
+const getUserStatusClassName = (status: UserStatus): string => {
+  switch (status) {
+    case "AVAILABLE":
+      return "user-status-pill available";
+    case "BUSY":
+      return "user-status-pill busy";
+    case "UNAVAILABLE":
+      return "user-status-pill unavailable";
+    default:
+      return "user-status-pill";
+  }
+};
+
 export function DashboardPage() {
   const { getToken, isLoaded, isSignedIn } = useAuth();
   const syncState = useSyncCurrentUser();
@@ -851,6 +864,11 @@ export function DashboardPage() {
         <section className="card">
           <h2>My ES Controls</h2>
           <p className="subtle">Set your language coverage and availability before receiving requests.</p>
+          <div className="es-status-hero">
+            <span className={getUserStatusClassName(currentEsProfile.status)}>
+              {currentEsProfile.status}
+            </span>
+          </div>
           <div className="maintenance-grid">
             <label className="control-field">
               <span>Status</span>
@@ -1157,6 +1175,9 @@ export function DashboardPage() {
                         )}
                       </td>
                       <td>
+                        <div className="status-cell">
+                          <span className={getUserStatusClassName(user.status)}>{user.status}</span>
+                        </div>
                         <select
                           value={user.status}
                           onChange={(event) => onUserStatusChange(user.id, event.target.value as UserStatus)}

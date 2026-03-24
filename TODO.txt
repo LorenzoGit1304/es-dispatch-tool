@@ -17,12 +17,30 @@
 - [x] Sanity 5: add migration status check command (`npm run migrate:status`).
 - [x] Sanity 6: add auth/role smoke check command (`npm run smoke:auth`) for 401/403/200 validation.
 - [x] Sanity 7: cleanup commit hygiene (`.gitignore` hardening for deps/build/backups).
+- [x] Dispatch update: enrollment language selection (`English`, `Spanish`, `Both`) persisted on requests.
+- [x] Dispatch update: language-aware routing applied to initial assignment, reject reassignment, timeout reassignment, and admin manual re-offer validation.
+- [x] Dispatch update: `English` can route to `English` or `Both`; `Spanish` can route to `Spanish` or `Both`; `Both` can route to any compatible ES.
+- [x] Dispatch update: accept and reject offer flows fixed after language-routing changes.
+- [x] ES UX update: offer queue moved above assigned enrollments and stronger new-offer alerts added.
 - [ ] Phase 7 Add automated tests (dispatch fairness, race conditions, auth/role + core frontend flows).
 - [ ] Phase 8 Railway deployment pipeline + health monitoring + runbook checks.
 
-## Post-Commit QA Checklist (after `271ec3f`)
+## Current Priorities
 
-- [x] Apply latest migrations and confirm `009_add_current_enrollment_pointer` is present.
+- [ ] Regression pass: manually test `English`, `Spanish`, and `Both` enrollment flows from AS creation through ES accept, reject, reassign, and complete.
+- [ ] Regression pass: verify admin re-offer respects language compatibility and blocks mismatched ES assignments.
+- [ ] Regression pass: verify timeout reassignment stays within the correct language-compatible ES pool.
+- [ ] Regression pass: verify ES notifications still work after the latest queue/order changes (sound, toast, browser notification, top-of-queue placement).
+- [ ] Regression pass: verify status-pill styling and dashboard visibility changes did not break layout on desktop and mobile.
+- [ ] Production prep: create Railway backend service and map Postgres `PG*` variables into app `DB_*` variables.
+- [ ] Production prep: create Railway frontend service and point `VITE_API_BASE_URL` to the deployed backend.
+- [ ] Production prep: add production frontend domain to Clerk allowed origins and redirect URLs.
+- [ ] Production prep: run backend migrations in Railway before first production sign-in.
+- [ ] Production prep: run post-deploy smoke test across `ADMIN`, `AS`, and `ES`.
+
+## Post-Commit QA Checklist
+
+- [x] Apply latest migrations and confirm `010_add_enrollment_language` is present.
 - [x] Admin `Enrollment Queue Control`: verify search/filter/aging badges behave correctly.
 - [x] Admin manual re-offer: only `WAITING` enrollments can be re-offered; action logs in audit.
 - [x] AS `Assigned / Offered ES`: verify name/id appears before and after acceptance.
@@ -32,8 +50,12 @@
 - [x] Completion ownership: AS cannot complete; ES can complete own assigned; admin override still works.
 - [x] Conflict prevention UX: modal confirms before reject/complete/role change; cancel performs no action.
 - [x] Session awareness: invalid/expired session shows warning banner.
-- [ ] Sound settings: `Sound: On/Off` persists after reload and toggles notifications.
+- [ ] Sound settings: slider/default volume persists after reload and notification audio stays enabled when expected.
 - [x] ES new-offer alert: plays ~5 seconds on newly received pending request.
+- [ ] ES browser notification: permission granted -> new offer triggers system notification.
 - [ ] AS transition sounds: accepted/reassigned/all-rejected/completed each trigger expected sound.
-- [ ] Polling refresh: AS/ES dashboards update in ~10s without manual refresh.
+- [x] Polling refresh: AS/ES dashboards update in ~10s without manual refresh.
+- [ ] Language routing: `English` routes to `English` or `Both`; `Spanish` routes to `Spanish` or `Both`; `Both` routes to any compatible ES.
+- [ ] Reject flow: rejecting an offer reassigns correctly without `500` errors.
+- [ ] Accept flow: accepting an offer succeeds without `500` errors.
 - [ ] Regression checks: backend `npm run typecheck`, frontend `npm run build`, backend `npm run smoke:auth` pass.

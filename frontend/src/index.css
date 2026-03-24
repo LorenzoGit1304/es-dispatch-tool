@@ -279,6 +279,46 @@ body {
   color: var(--accent);
 }
 
+.es-status-hero {
+  margin: 0.9rem 0 1rem;
+}
+
+.status-cell {
+  margin-bottom: 0.45rem;
+}
+
+.user-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 148px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0.6rem 1.15rem;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  box-shadow: 0 0 0 3px rgba(31, 53, 83, 0.08);
+}
+
+.user-status-pill.available {
+  border-color: #13345f;
+  background: linear-gradient(135deg, #22518b, #3e6ea9);
+  color: var(--bright-snow);
+}
+
+.user-status-pill.busy {
+  border-color: #7e6842;
+  background: linear-gradient(135deg, #b5a07a, #9a835b);
+  color: #1f1b16;
+}
+
+.user-status-pill.unavailable {
+  border-color: #533224;
+  background: linear-gradient(135deg, #8a5540, #6b3f2d);
+  color: var(--bright-snow);
+}
+
 .offer-alert-banner {
   display: flex;
   justify-content: space-between;
