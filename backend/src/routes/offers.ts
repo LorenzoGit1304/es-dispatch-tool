@@ -132,7 +132,7 @@ router.post("/:id/reject", requireRole("ES", "ADMIN"), async (req, res) => {
       `SELECT o.*, e.language AS enrollment_language
        FROM enrollment_offers o
        JOIN enrollments e ON e.id = o.enrollment_id
-       WHERE id = $1
+       WHERE o.id = $1
        FOR UPDATE`,
       [id]
     );

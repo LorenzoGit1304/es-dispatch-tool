@@ -12,7 +12,7 @@ import { apiError } from "../utils/apiError";
 import { getActorUserId, logAuditEvent } from "../utils/auditLog";
 import { requireRole } from "../middleware/requireRole";
 import { getAuthenticatedClerkId, getAuthenticatedDbUser } from "../utils/authenticatedUser";
-import { DispatchLanguage, findAssignableEs } from "../utils/dispatchSelection";
+import { DispatchLanguage, findAssignableEs, isEsLanguageCompatible } from "../utils/dispatchSelection";
 
 const router = Router();
 
@@ -510,7 +510,7 @@ router.post(
           "TARGET_ES_NOT_ASSIGNABLE"
         );
       }
-      if (targetEs.language !== enrollment.language) {
+      if (!isEsLanguageCompatible(enrollment.language as DispatchLanguage, targetEs.language)) {
         await client.query("ROLLBACK");
         return apiError(
           res,
