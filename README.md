@@ -28,6 +28,14 @@ Current focus:
 
 ## Local Setup
 
+For a complete step-by-step migration guide, see `MIGRATION_GUIDE.md`.
+
+For the easiest local setup, run:
+
+```bash
+./setup-local.sh
+```
+
 ### Backend
 
 1. Copy env file:
